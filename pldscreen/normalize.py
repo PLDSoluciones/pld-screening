@@ -1,146 +1,102 @@
-"""Normalización de nombres, identificadores y fechas (español/árabe/inglés)."""
-from __future__ import annotations
+import pytest
 
-import re
-import unicodedata
-from functools import lru_cache
-
-STOP_TOKENS = {"DE", "DEL", "LA", "LAS", "LOS", "Y", "E", "VDA", "DA", "DAS", "DOS", "DI", "VAN", "VON", "DER"}
-
-# Formas societarias que se eliminan al final del nombre de personas morales.
-_LEGAL_FORMS = [
-    "S A P I B DE C V", "S A P I DE C V", "SAPI DE CV", "SAPI B DE CV", "S A B DE C V", "SAB DE CV",
-    "S DE R L DE C V", "S DE RL DE CV", "S DE R L", "S A DE C V", "SA DE CV", "S A P I", "SAPI", "SAB",
-    "S R L DE C V", "SRL DE CV", "S C", "S A S", "SAS", "S A", "SA", "CV", "C V", "A C", "AC", "S R L", "SRL",
-    "L L C", "LLC", "L T D", "LTD", "LIMITED", "INC", "CORP", "CORPORATION", "CO", "GMBH", "S P A", "SPA",
-    "S A S DE C V", "SOCIEDAD ANONIMA", "SOCIEDAD CIVIL", "ASOCIACION CIVIL", "DE RL", "R L",
-]
-_LEGAL_SEQS = sorted((f.split() for f in _LEGAL_FORMS), key=len, reverse=True)
-
-_MONTHS = {m: i for i, m in enumerate(
-    ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"], 1)}
+from pldscreen.normalize import name_tokens, normalize_rfc, parse_dob, skeleton
 
 
-def strip_accents(s: str) -> str:
-    return "".join(c for c in unicodedata.normalize("NFKD", s) if not unicodedata.combining(c))
+def top(svc, **q):
+    r = svc.screen(q, "test", persist=False)
+    return r, (r["coincidencias"][0] if r["coincidencias"] else None)
 
 
-def clean(s: str) -> str:
-    s = strip_accents(s or "").upper()
-    s = s.replace("'", "").replace("`", "").replace("’", "")
-    s = re.sub(r"[^A-Z0-9 ]+", " ", s)
-    return re.sub(r"\s+", " ", s).strip()
+def test_normalizacion():
+    assert name_tokens("Constructora del Norte, S.A. de C.V.", True) == ("CONSTRUCTORA", "NORTE")
+    assert name_tokens("MARÍA DE LA LUZ NÚÑEZ") == ("MARIA", "LUZ", "NUNEZ")
+    assert skeleton("MOHAMED") == skeleton("MUHAMMAD") == skeleton("MOHAMMED")
+    assert normalize_rfc("vah 710312 ab1") == "VAH710312AB1"
+    assert parse_dob("DOB 12 Mar 1971") == (1971, 3, 12)
 
 
-_STRONG_SINGLE = {"SAPI", "SAB", "SRL", "LLC", "LTD", "INC", "CORP", "GMBH", "SAS", "SPA", "LIMITED", "CORPORATION"}
-_STRONG_SEQS = [q for q in _LEGAL_SEQS if len(q) >= 3 or (len(q) == 1 and q[0] in _STRONG_SINGLE)
-                or q in (["S", "A"], ["SA", "DE", "CV"], ["L", "L", "C"], ["S", "R", "L"])]
+def test_ofac_formato_real_y_orden_invertido(svc):
+    # SDN: "VARGAS ROLDAN, Hector Ernesto" → consulta en orden natural y con acentos
+    r, m = top(svc, nombre="Héctor Ernesto Vargas Roldán")
+    assert m and m["fuente"] == "OFAC_SDN" and m["nivel"] in ("ALTA", "EXACTA")
+    r, m = top(svc, nombre="VARGAS ROLDAN HECTOR")  # sin segundo nombre, otro orden
+    assert m and m["fuente"] == "OFAC_SDN" and m["puntaje"] >= 78
 
 
-def _strip_legal(tokens: list[str], strong_only: bool = False) -> list[str]:
-    seqs = _STRONG_SEQS if strong_only else _LEGAL_SEQS
-    changed = True
-    while changed and len(tokens) > 1:
-        changed = False
-        for seq in seqs:
-            n = len(seq)
-            if len(tokens) > n and tokens[-n:] == seq:
-                tokens = tokens[:-n]
-                changed = True
-                break
-    return tokens
+def test_alias_en_ofac(svc):
+    r, m = top(svc, nombre="Hector Hernandez Roldan")
+    assert m and m["fuente"] == "OFAC_SDN" and m["tipo_nombre"] == "alias"
 
 
-def is_org_name(name: str) -> bool:
-    toks = clean(name).split()
-    return len(toks) > 1 and _strip_legal(list(toks), True) != toks
+def test_rfc_exacto_extraido_de_remarks_ofac(svc):
+    r, m = top(svc, nombre="Nombre completamente distinto", rfc="VARH710312AB1")
+    assert m and m["nivel"] == "EXACTA" and m["fuente"] == "OFAC_SDN"
 
 
-@lru_cache(maxsize=200_000)
-def name_tokens(name: str, org: bool | None = None) -> tuple[str, ...]:
-    """Tokens normalizados. org=None → se detecta por forma societaria."""
-    toks = clean(name).split()
-    if org is None:
-        toks = _strip_legal(list(toks), strong_only=True)
-    elif org:
-        toks = _strip_legal(list(toks))
-    toks = [t for t in toks if t not in STOP_TOKENS] or toks
-    return tuple(toks)
+def test_rfc_base_con_homoclave_distinta(svc):
+    r, m = top(svc, nombre="Pedro Martinez Robles", rfc="PEMR800101AAA")
+    assert m and m["fuente"] == "SAT_69B" and m["nivel"] in ("ALTA", "EXACTA")
 
 
-def normalize_name(name: str, org: bool | None = None) -> str:
-    return " ".join(name_tokens(name, org))
+def test_curp_exacta_lpb(svc):
+    r, m = top(svc, curp="QUSR650505HSLNLM04")
+    assert m and m["fuente"] == "LPB_UIF" and m["nivel"] == "EXACTA"
+    assert r["resultado"] == "ALTA_PRIORIDAD_DETENER_OPERACION"
 
 
-_PHON = [
-    (r"SCH", "S"), (r"CH", "X"), (r"SH", "X"), (r"KH", "K"), (r"PH", "F"), (r"GH", "G"), (r"TH", "T"),
-    (r"QU", "K"), (r"GU(?=[EI])", "G"), (r"G(?=[EI])", "J"), (r"C(?=[EI])", "S"), (r"C", "K"), (r"Q", "K"),
-    (r"Z", "S"), (r"V", "B"), (r"W", "B"), (r"LL", "Y"), (r"Y", "I"), (r"OU", "U"), (r"H", ""),
-]
+def test_persona_moral_con_forma_societaria_distinta(svc):
+    r, m = top(svc, nombre="Facturadora Andina SA CV", tipo="M")
+    assert m and m["fuente"] == "SAT_69B" and m["puntaje"] >= 93
 
 
-@lru_cache(maxsize=200_000)
-def skeleton(token: str) -> str:
-    """Clave fonética 'esqueleto consonántico' (tolera MOHAMED/MUHAMMAD, JOSE/YOSE, KATIA/CATIA)."""
-    t = token
-    for pat, rep in _PHON:
-        t = re.sub(pat, rep, t)
-    if not t:
-        return ""
-    out = [t[0]]
-    prev = t[0]
-    for ch in t[1:]:
-        if ch not in "AEIOU" and ch != prev:
-            out.append(ch)
-        prev = ch
-    return "".join(out)
+def test_desvirtuado_no_alerta(svc):
+    r, m = top(svc, nombre="Servicios Integrales del Norte SA de CV", tipo="M")
+    assert m is None
 
 
-# ---------------------------------------------------------------- identificadores
-def normalize_rfc(rfc: str | None) -> str | None:
-    if not rfc:
-        return None
-    r = re.sub(r"[^A-Z0-9&Ñ]", "", rfc.upper().replace(" ", ""))
-    return r if len(r) in (12, 13) else None
+def test_transliteracion_arabe(svc):
+    r, m = top(svc, nombre="Mohammed Khalid Al Rahman")
+    assert m and m["fuente"] == "OFAC_SDN"
+    r, m = top(svc, nombre="Abdulkarim Alhashimi")  # unido, tal como alias ONU
+    assert m and m["fuente"] == "ONU_CSNU" and m["nivel"] in ("ALTA", "EXACTA")
 
 
-def normalize_curp(curp: str | None) -> str | None:
-    if not curp:
-        return None
-    c = re.sub(r"[^A-Z0-9]", "", curp.upper())
-    return c if len(c) == 18 else None
+def test_homonimo_se_degrada_por_fecha_de_nacimiento(svc):
+    base = {"nombre": "Laura Beatriz Fuentes Mendoza"}
+    r1, m1 = top(svc, **base, fecha_nacimiento="1975-11-20")
+    r2, m2 = top(svc, **base, fecha_nacimiento="1990-01-01")
+    assert m1 and m1["fuente"] == "PEP" and m1["nivel"] == "ALTA"
+    assert m2 is None or m2["puntaje"] < m1["puntaje"] - 10
+    assert m2 is None or m2["nivel"] != "ALTA"
 
 
-# ---------------------------------------------------------------- fechas
-def parse_dob(s: str | None) -> tuple[int | None, int | None, int | None] | None:
-    """Devuelve (año, mes, día) con None en lo desconocido."""
-    if not s:
-        return None
-    s = str(s).strip().upper()
-    m = re.search(r"(\d{4})-(\d{1,2})-(\d{1,2})", s)
-    if m:
-        return int(m[1]), int(m[2]), int(m[3])
-    m = re.search(r"(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})", s)
-    if m:
-        return int(m[3]), int(m[2]), int(m[1])
-    m = re.search(r"(\d{1,2})\s+([A-Z]{3})[A-Z]*\s+(\d{4})", s)
-    if m and m[2] in _MONTHS:
-        return int(m[3]), _MONTHS[m[2]], int(m[1])
-    m = re.search(r"([A-Z]{3})[A-Z]*\s+(\d{4})", s)
-    if m and m[1] in _MONTHS:
-        return int(m[2]), _MONTHS[m[1]], None
-    m = re.search(r"\b(1[89]\d{2}|20\d{2})\b", s)
-    if m:
-        return int(m[1]), None, None
-    return None
+def test_nombre_comun_de_un_solo_elemento_no_es_alta(svc):
+    r, m = top(svc, nombre="Armando")
+    assert m is None or m["nivel"] in ("BAJA", "MEDIA")
 
 
-def dob_compare(a, b) -> str | None:
-    """'full' | 'year' | 'mismatch' | None (sin dato comparable)."""
-    if not a or not b or a[0] is None or b[0] is None:
-        return None
-    if a[0] != b[0]:
-        return "mismatch"
-    if a[1] and b[1] and a[2] and b[2]:
-        return "full" if (a[1], a[2]) == (b[1], b[2]) else "mismatch"
-    return "year"
+def test_sin_coincidencias(svc):
+    r, m = top(svc, nombre="Zoila Ramirez Cantu", fecha_nacimiento="1988-04-04")
+    assert m is None and r["resultado"] == "SIN_COINCIDENCIAS_RELEVANTES"
+
+
+@pytest.mark.parametrize("variante", ["Ramon Alberto Quintero Salas", "QUINTERO SALAS RAMON ALBERTO",
+                                      "Ramón A. Quintero Salas", "Ramon Albreto Quintero Salas",  # transposición
+                                      "Ramon Quintero"])
+def test_variantes_detectadas_lpb(svc, variante):
+    r, m = top(svc, nombre=variante)
+    assert m and m["fuente"] == "LPB_UIF", variante
+
+
+def test_forma_societaria_al_inicio_o_invertida():
+    """Caso real de la autoprueba: la forma societaria capturada al inicio no debe bajar el nivel."""
+    from pldscreen.matching import Index, Query
+    ents = [{"id": i, "primary_name": n, "names": [(n, "primary")], "entity_type": "M", "source_code": "X",
+             "external_id": str(i), "dobs": []} for i, n in enumerate(
+        ["MFAA HOLDINGS LIMITED", "GRUPO BURHAM, S.A. DE C.V.", "LH RENTAL S.A. DE C.V.", "GEFEST-M LLC"], 1)]
+    idx = Index(ents)
+    for q, eid in [("LIMITED HOLDINGS MFAA", 1), ("C.V. DE S.A. BURHAM, GRUPO", 2),
+                   ("C.V. DE S.A. RENTAL LH", 3), ("LLC GEFEST-M", 4), ("S.A. DE C.V. GRUPO BURHAM", 2)]:
+        ms = idx.search(Query(name=q, entity_type="M"))
+        assert any(m.entry_id == eid and m.level in ("MEDIA", "ALTA", "EXACTA") for m in ms), q
