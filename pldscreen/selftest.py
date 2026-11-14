@@ -42,7 +42,7 @@ def run(svc, n_per_source: int = 150, seed: int = 1) -> dict:
                 "sin acentos/minúsculas": "".join(c for c in unicodedata.normalize("NFD", raw.lower())
                                                   if not unicodedata.combining(c)),
             }
-            if len(toks) >= 4:
+            if len(toks) >= 4 and et != "M":
                 variants["sin un nombre intermedio"] = " ".join(list(toks[:1]) + list(toks[2:]))
             long_tok = [t for t in toks if len(t) >= 5]
             if long_tok:

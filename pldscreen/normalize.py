@@ -37,7 +37,9 @@ _STRONG_SEQS = [q for q in _LEGAL_SEQS if len(q) >= 3 or (len(q) == 1 and q[0] i
                 or q in (["S", "A"], ["SA", "DE", "CV"], ["L", "L", "C"], ["S", "R", "L"])]
 
 
-def _strip_legal(tokens: list[str], strong_only: bool = False) -> list[str]:
+def _strip_legal(tokens: list[str], strong_only: bool = False, leading: bool = False) -> list[str]:
+    """Quita la forma societaria al final y, si leading=True (persona moral conocida), también al inicio
+    (p. ej. «S.A. DE C.V. GRUPO X» capturado al revés), tolerando conectores «DE» sueltos."""
     seqs = _STRONG_SEQS if strong_only else _LEGAL_SEQS
     changed = True
     while changed and len(tokens) > 1:
@@ -48,6 +50,15 @@ def _strip_legal(tokens: list[str], strong_only: bool = False) -> list[str]:
                 tokens = tokens[:-n]
                 changed = True
                 break
+            if leading and len(tokens) > n and tokens[:n] == seq:
+                tokens = tokens[n:]
+                changed = True
+                break
+        if leading and not changed:
+            if len(tokens) > 1 and tokens[0] in ("DE", "Y"):
+                tokens, changed = tokens[1:], True
+            elif len(tokens) > 1 and tokens[-1] in ("DE", "Y"):
+                tokens, changed = tokens[:-1], True
     return tokens
 
 
@@ -63,7 +74,7 @@ def name_tokens(name: str, org: bool | None = None) -> tuple[str, ...]:
     if org is None:
         toks = _strip_legal(list(toks), strong_only=True)
     elif org:
-        toks = _strip_legal(list(toks))
+        toks = _strip_legal(list(toks), leading=True)
     toks = [t for t in toks if t not in STOP_TOKENS] or toks
     return tuple(toks)
 
