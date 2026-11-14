@@ -28,6 +28,7 @@ def run(svc, n_per_source: int = 150, seed: int = 1) -> dict:
         if len(toks) >= 2:
             by_source[e["source_code"]].append((eid, e, toks))
     report: dict = {}
+    fallos: dict = defaultdict(list)  # (fuente, variante) → casos que no se encontraron
     for src, items in by_source.items():
         sample = rnd.sample(items, min(n_per_source, len(items)))
         stats: dict[str, list[bool]] = defaultdict(list)
@@ -49,7 +50,13 @@ def run(svc, n_per_source: int = 150, seed: int = 1) -> dict:
                 variants["errata de captura"] = " ".join(_typo(x, rnd) if x == t else x for x in toks)
             for k, v in variants.items():
                 ms = idx.search(Query(name=v, entity_type=et))
-                stats[k].append(any(m.entry_id in ok_ids and level_rank(m.level) >= level_rank("MEDIA") for m in ms))
+                ok = any(m.entry_id in ok_ids and level_rank(m.level) >= level_rank("MEDIA") for m in ms)
+                stats[k].append(ok)
+                if not ok:
+                    mejor = max(ms, key=lambda m: m.score, default=None)
+                    fallos[(src, k)].append({"tipo": et, "original": raw, "consulta": v,
+                                             "mejor": (f"{mejor.level} {mejor.score:.0f} -> {mejor.matched_name}"
+                                                       if mejor else "sin resultados")})
             if e.get("rfc"):
                 ms = idx.search(Query(name="NOMBRE QUE NO COINCIDE", rfc=e["rfc"]))
                 stats["solo RFC"].append(any(m.entry_id == eid and m.level == "EXACTA" for m in ms))
@@ -66,6 +73,7 @@ def run(svc, n_per_source: int = 150, seed: int = 1) -> dict:
                                    "porcentaje": round(100 * fp / tot, 1) if tot else None}
     base = [v["recall"] for s, d in report.items() if not s.startswith("_")
             for k, v in d.items() if k in ("exacto", "orden invertido", "sin acentos/minúsculas")]
+    report["_fallos"] = {f"{a} | {b}": v for (a, b), v in fallos.items()}
     report["_aprobado"] = bool(base) and min(base) >= 99.0
     return report
 
@@ -78,6 +86,12 @@ def format_report(r: dict) -> str:
         lines.append(f"\n{src}")
         for k, v in d.items():
             lines.append(f"  {k:28s} {v['recall']:6.1f}%   (n={v['n']})")
+    if r.get("_fallos"):
+        lines.append("\n=== CASOS QUE FALLARON (máx. 8 por grupo) ===")
+        for g, casos in r["_fallos"].items():
+            lines.append(f"\n[{g}]  {len(casos)} fallos")
+            for c in casos[:8]:
+                lines.append(f"  tipo={c['tipo']}\n    original: {c['original']}\n    consulta: {c['consulta']}\n    mejor:    {c['mejor']}")
     c = r["_control_negativo"]
     lines.append(f"\nControl negativo: {c['con_alerta_MEDIA_o_mayor']}/{c['consultas']} nombres inventados dieron alerta "
                  f"({c['porcentaje']}%)")
