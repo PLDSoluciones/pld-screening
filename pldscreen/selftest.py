@@ -1,102 +1,99 @@
-import pytest
+"""Autoprueba con DATOS REALES: toma registros de las listas ya cargadas (OFAC, ONU, SAT, LPB…), les genera
+variantes típicas de captura y verifica que el motor los encuentre. Sirve para validar su instalación el día 1
+y después de cada cambio de umbrales:  python -m pldscreen selftest"""
+from __future__ import annotations
 
-from pldscreen.normalize import name_tokens, normalize_rfc, parse_dob, skeleton
+import random
+import unicodedata
+from collections import defaultdict
 
-
-def top(svc, **q):
-    r = svc.screen(q, "test", persist=False)
-    return r, (r["coincidencias"][0] if r["coincidencias"] else None)
-
-
-def test_normalizacion():
-    assert name_tokens("Constructora del Norte, S.A. de C.V.", True) == ("CONSTRUCTORA", "NORTE")
-    assert name_tokens("MARÍA DE LA LUZ NÚÑEZ") == ("MARIA", "LUZ", "NUNEZ")
-    assert skeleton("MOHAMED") == skeleton("MUHAMMAD") == skeleton("MOHAMMED")
-    assert normalize_rfc("vah 710312 ab1") == "VAH710312AB1"
-    assert parse_dob("DOB 12 Mar 1971") == (1971, 3, 12)
+from .matching import Query, level_rank
+from .normalize import name_tokens
 
 
-def test_ofac_formato_real_y_orden_invertido(svc):
-    # SDN: "VARGAS ROLDAN, Hector Ernesto" → consulta en orden natural y con acentos
-    r, m = top(svc, nombre="Héctor Ernesto Vargas Roldán")
-    assert m and m["fuente"] == "OFAC_SDN" and m["nivel"] in ("ALTA", "EXACTA")
-    r, m = top(svc, nombre="VARGAS ROLDAN HECTOR")  # sin segundo nombre, otro orden
-    assert m and m["fuente"] == "OFAC_SDN" and m["puntaje"] >= 78
+def _typo(tok: str, rnd: random.Random) -> str:
+    i = rnd.randrange(1, len(tok) - 1)
+    return tok[:i] + tok[i + 1] + tok[i] + tok[i + 2:] if rnd.random() < .5 else tok[:i] + tok[i + 1:]
 
 
-def test_alias_en_ofac(svc):
-    r, m = top(svc, nombre="Hector Hernandez Roldan")
-    assert m and m["fuente"] == "OFAC_SDN" and m["tipo_nombre"] == "alias"
+def run(svc, n_per_source: int = 150, seed: int = 1) -> dict:
+    rnd = random.Random(seed)
+    idx = svc.index()
+    groups = defaultdict(list)  # tokens ordenados → ids (homónimos exactos cuentan como acierto)
+    by_source = defaultdict(list)
+    for eid, e in idx.entries.items():
+        org = True if e["entity_type"] == "M" else (False if e["entity_type"] == "F" else None)
+        toks = name_tokens(e["primary_name"], org)
+        groups[tuple(sorted(toks))].append(eid)
+        if len(toks) >= 2:
+            by_source[e["source_code"]].append((eid, e, toks))
+    report: dict = {}
+    fallos: dict = defaultdict(list)  # (fuente, variante) → casos que no se encontraron
+    for src, items in by_source.items():
+        sample = rnd.sample(items, min(n_per_source, len(items)))
+        stats: dict[str, list[bool]] = defaultdict(list)
+        for eid, e, toks in sample:
+            et = e["entity_type"]
+            raw = e["primary_name"]
+            ok_ids = set(groups[tuple(sorted(toks))])
+            variants = {
+                "exacto": raw,
+                "orden invertido": " ".join(reversed(raw.split())),
+                "sin acentos/minúsculas": "".join(c for c in unicodedata.normalize("NFD", raw.lower())
+                                                  if not unicodedata.combining(c)),
+            }
+            if len(toks) >= 4:
+                variants["sin un nombre intermedio"] = " ".join(list(toks[:1]) + list(toks[2:]))
+            long_tok = [t for t in toks if len(t) >= 5]
+            if long_tok:
+                t = rnd.choice(long_tok)
+                variants["errata de captura"] = " ".join(_typo(x, rnd) if x == t else x for x in toks)
+            for k, v in variants.items():
+                ms = idx.search(Query(name=v, entity_type=et))
+                ok = any(m.entry_id in ok_ids and level_rank(m.level) >= level_rank("MEDIA") for m in ms)
+                stats[k].append(ok)
+                if not ok:
+                    mejor = max(ms, key=lambda m: m.score, default=None)
+                    fallos[(src, k)].append({"tipo": et, "original": raw, "consulta": v,
+                                             "mejor": (f"{mejor.level} {mejor.score:.0f} -> {mejor.matched_name}"
+                                                       if mejor else "sin resultados")})
+            if e.get("rfc"):
+                ms = idx.search(Query(name="NOMBRE QUE NO COINCIDE", rfc=e["rfc"]))
+                stats["solo RFC"].append(any(m.entry_id == eid and m.level == "EXACTA" for m in ms))
+        report[src] = {k: {"n": len(v), "recall": round(100 * sum(v) / len(v), 1)} for k, v in stats.items()}
+    # control negativo: nombres armados con tokens reales mezclados de entradas distintas
+    all_toks = [t for items in by_source.values() for _, _, toks in items for t in toks]
+    fp = tot = 0
+    for _ in range(300 if all_toks else 0):
+        q = " ".join(rnd.sample(all_toks, 3))
+        ms = idx.search(Query(name=q, entity_type="F"))
+        fp += any(level_rank(m.level) >= level_rank("MEDIA") for m in ms)
+        tot += 1
+    report["_control_negativo"] = {"consultas": tot, "con_alerta_MEDIA_o_mayor": fp,
+                                   "porcentaje": round(100 * fp / tot, 1) if tot else None}
+    base = [v["recall"] for s, d in report.items() if not s.startswith("_")
+            for k, v in d.items() if k in ("exacto", "orden invertido", "sin acentos/minúsculas")]
+    report["_fallos"] = {f"{a} | {b}": v for (a, b), v in fallos.items()}
+    report["_aprobado"] = bool(base) and min(base) >= 99.0
+    return report
 
 
-def test_rfc_exacto_extraido_de_remarks_ofac(svc):
-    r, m = top(svc, nombre="Nombre completamente distinto", rfc="VARH710312AB1")
-    assert m and m["nivel"] == "EXACTA" and m["fuente"] == "OFAC_SDN"
-
-
-def test_rfc_base_con_homoclave_distinta(svc):
-    r, m = top(svc, nombre="Pedro Martinez Robles", rfc="PEMR800101AAA")
-    assert m and m["fuente"] == "SAT_69B" and m["nivel"] in ("ALTA", "EXACTA")
-
-
-def test_curp_exacta_lpb(svc):
-    r, m = top(svc, curp="QUSR650505HSLNLM04")
-    assert m and m["fuente"] == "LPB_UIF" and m["nivel"] == "EXACTA"
-    assert r["resultado"] == "ALTA_PRIORIDAD_DETENER_OPERACION"
-
-
-def test_persona_moral_con_forma_societaria_distinta(svc):
-    r, m = top(svc, nombre="Facturadora Andina SA CV", tipo="M")
-    assert m and m["fuente"] == "SAT_69B" and m["puntaje"] >= 93
-
-
-def test_desvirtuado_no_alerta(svc):
-    r, m = top(svc, nombre="Servicios Integrales del Norte SA de CV", tipo="M")
-    assert m is None
-
-
-def test_transliteracion_arabe(svc):
-    r, m = top(svc, nombre="Mohammed Khalid Al Rahman")
-    assert m and m["fuente"] == "OFAC_SDN"
-    r, m = top(svc, nombre="Abdulkarim Alhashimi")  # unido, tal como alias ONU
-    assert m and m["fuente"] == "ONU_CSNU" and m["nivel"] in ("ALTA", "EXACTA")
-
-
-def test_homonimo_se_degrada_por_fecha_de_nacimiento(svc):
-    base = {"nombre": "Laura Beatriz Fuentes Mendoza"}
-    r1, m1 = top(svc, **base, fecha_nacimiento="1975-11-20")
-    r2, m2 = top(svc, **base, fecha_nacimiento="1990-01-01")
-    assert m1 and m1["fuente"] == "PEP" and m1["nivel"] == "ALTA"
-    assert m2 is None or m2["puntaje"] < m1["puntaje"] - 10
-    assert m2 is None or m2["nivel"] != "ALTA"
-
-
-def test_nombre_comun_de_un_solo_elemento_no_es_alta(svc):
-    r, m = top(svc, nombre="Armando")
-    assert m is None or m["nivel"] in ("BAJA", "MEDIA")
-
-
-def test_sin_coincidencias(svc):
-    r, m = top(svc, nombre="Zoila Ramirez Cantu", fecha_nacimiento="1988-04-04")
-    assert m is None and r["resultado"] == "SIN_COINCIDENCIAS_RELEVANTES"
-
-
-@pytest.mark.parametrize("variante", ["Ramon Alberto Quintero Salas", "QUINTERO SALAS RAMON ALBERTO",
-                                      "Ramón A. Quintero Salas", "Ramon Albreto Quintero Salas",  # transposición
-                                      "Ramon Quintero"])
-def test_variantes_detectadas_lpb(svc, variante):
-    r, m = top(svc, nombre=variante)
-    assert m and m["fuente"] == "LPB_UIF", variante
-
-
-def test_forma_societaria_al_inicio_o_invertida():
-    """Caso real de la autoprueba: la forma societaria capturada al inicio no debe bajar el nivel."""
-    from pldscreen.matching import Index, Query
-    ents = [{"id": i, "primary_name": n, "names": [(n, "primary")], "entity_type": "M", "source_code": "X",
-             "external_id": str(i), "dobs": []} for i, n in enumerate(
-        ["MFAA HOLDINGS LIMITED", "GRUPO BURHAM, S.A. DE C.V.", "LH RENTAL S.A. DE C.V.", "GEFEST-M LLC"], 1)]
-    idx = Index(ents)
-    for q, eid in [("LIMITED HOLDINGS MFAA", 1), ("C.V. DE S.A. BURHAM, GRUPO", 2),
-                   ("C.V. DE S.A. RENTAL LH", 3), ("LLC GEFEST-M", 4), ("S.A. DE C.V. GRUPO BURHAM", 2)]:
-        ms = idx.search(Query(name=q, entity_type="M"))
-        assert any(m.entry_id == eid and m.level in ("MEDIA", "ALTA", "EXACTA") for m in ms), q
+def format_report(r: dict) -> str:
+    lines = []
+    for src, d in r.items():
+        if src.startswith("_"):
+            continue
+        lines.append(f"\n{src}")
+        for k, v in d.items():
+            lines.append(f"  {k:28s} {v['recall']:6.1f}%   (n={v['n']})")
+    if r.get("_fallos"):
+        lines.append("\n=== CASOS QUE FALLARON (máx. 8 por grupo) ===")
+        for g, casos in r["_fallos"].items():
+            lines.append(f"\n[{g}]  {len(casos)} fallos")
+            for c in casos[:8]:
+                lines.append(f"  tipo={c['tipo']}\n    original: {c['original']}\n    consulta: {c['consulta']}\n    mejor:    {c['mejor']}")
+    c = r["_control_negativo"]
+    lines.append(f"\nControl negativo: {c['con_alerta_MEDIA_o_mayor']}/{c['consultas']} nombres inventados dieron alerta "
+                 f"({c['porcentaje']}%)")
+    lines.append("RESULTADO: " + ("APROBADO" if r["_aprobado"] else "REVISAR (algún recall base < 99 %)"))
+    return "\n".join(lines)
