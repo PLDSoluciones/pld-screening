@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PLD Screening</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--tx:#1b1f24;--mut:#5b6572;--bd:#d9dee5;--ac:#0b5cab;--rojo:#b42318;--nar:#b54708;--ama:#8a6d00;--ver:#067647}
+@media (prefers-color-scheme:dark){:root{--bg:#14181d;--card:#1c2229;--tx:#e8ecf1;--mut:#9aa6b4;--bd:#2d3640;--ac:#5aa7ff;--rojo:#ff8a80;--nar:#ffb86b;--ama:#f2d15b;--ver:#5bd69b}}
+*{box-sizing:border-box}body{margin:0;font:14px/1.45 system-ui,sans-serif;background:var(--bg);color:var(--tx)}
+header{display:flex;gap:12px;align-items:center;flex-wrap:wrap;padding:12px 16px;background:var(--card);border-bottom:1px solid var(--bd)}
+header h1{font-size:16px;margin:0;flex:1}nav button{margin-right:4px}
+main{max-width:1100px;margin:0 auto;padding:16px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:8px;padding:14px;margin-bottom:14px}
+label{display:block;font-size:12px;color:var(--mut);margin-bottom:2px}
+input,select,textarea,button{font:inherit;padding:7px 9px;border:1px solid var(--bd);border-radius:6px;background:var(--bg);color:var(--tx)}
+button{cursor:pointer;background:var(--ac);color:#fff;border-color:var(--ac)}button.sec{background:transparent;color:var(--tx);border-color:var(--bd)}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px}
+table{width:100%;border-collapse:collapse}th,td{padding:6px 8px;border-bottom:1px solid var(--bd);text-align:left;vertical-align:top}th{font-size:12px;color:var(--mut)}
+.b{display:inline-block;padding:1px 8px;border-radius:10px;font-size:12px;font-weight:600;border:1px solid currentColor}
+.EXACTA,.ALTA,.CRITICA{color:var(--rojo)}.MEDIA{color:var(--nar)}.BAJA{color:var(--ama)}.ok{color:var(--ver)}
+.res{font-size:16px;font-weight:700}.mut{color:var(--mut)}.hide{display:none}
+@media(max-width:600px){th:nth-child(n+5),td:nth-child(n+5){display:none}}
+</style>
+</head>
+<body>
+<header>
+  <h1>PLD Screening · Consulta de listas</h1>
+  <nav>
+    <button class="sec" data-t="consulta">Consulta rápida</button>
+    <button class="sec" data-t="expediente">Expediente</button>
+    <button class="sec" data-t="alertas">Alertas</button>
+    <button class="sec" data-t="listas">Listas</button>
+    <button class="sec" data-t="auditoria">Auditoría</button>
+  </nav>
+  <input id="key" type="password" placeholder="API key" size="18">
+</header>
+<main>
+<section id="consulta">
+  <div class="card">
+    <div class="grid">
+      <div><label>Referencia (ID de cliente; si se llena, se guarda y monitorea)</label><input id="ref" style="width:100%"></div>
+      <div><label>Nombre completo / razón social</label><input id="nombre" style="width:100%"></div>
+      <div><label>Tipo</label><select id="tipo" style="width:100%"><option value="">(auto)</option><option value="F">Persona física</option><option value="M">Persona moral</option></select></div>
+      <div><label>RFC</label><input id="rfc" style="width:100%"></div>
+      <div><label>CURP</label><input id="curp" style="width:100%"></div>
+      <div><label>Fecha de nacimiento</label><input id="dob" placeholder="AAAA-MM-DD" style="width:100%"></div>
+    </div>
+    <p><button id="go">Consultar</button> <span id="msg" class="mut"></span></p>
+  </div>
+  <div id="out"></div>
+</section>
+<section id="expediente" class="hide">
+  <div class="card">
+    <div class="grid">
+      <div><label>Expediente / No. de escritura o contrato</label><input id="exp" style="width:100%"></div>
+      <div><label>Tipo de acto</label><select id="acto" style="width:100%"><option>COMPRAVENTA_INMUEBLE</option><option>DONACION</option><option>PERMUTA</option><option>ADJUDICACION</option><option>FIDEICOMISO</option><option>CONSTITUCION_SOCIEDAD</option><option>MODIFICACION_SOCIEDAD</option><option>FUSION_ESCISION</option><option>PODER</option><option>ARRENDAMIENTO</option><option>PROMESA_COMPRAVENTA</option><option>DESARROLLO_INMOBILIARIO</option><option>CREDITO_HIPOTECARIO</option><option>OTRO</option></select></div>
+    </div>
+    <p class="mut">Capture cada persona que interviene. En personas morales agregue también su beneficiario controlador y representante (botón «+ relacionado»).</p>
+    <div id="partes"></div>
+    <p><button class="sec" id="addp">+ Parte</button> <button id="goe">Consultar expediente</button> <span id="msge" class="mut"></span></p>
+  </div>
+  <div id="oute"></div>
+</section>
+<section id="alertas" class="hide"><div class="card"><p><select id="st"><option value="">Todas</option><option>ABIERTA</option><option>PENDIENTE_APROBACION</option><option>CONFIRMADA</option><option>FALSO_POSITIVO</option></select> <button id="ra" class="sec">Actualizar</button></p><div id="al"></div></div></section>
+<section id="listas" class="hide"><div class="card" id="li"></div></section>
+<section id="auditoria" class="hide"><div class="card" id="au"></div></section>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+try{$('key').value=sessionStorage.getItem('k')||''}catch(e){}
+$('key').onchange=()=>{try{sessionStorage.setItem('k',$('key').value)}catch(e){}};
+async function api(p,o={}){const r=await fetch(p,{...o,headers:{'X-API-Key':$('key').value,'Content-Type':'application/json'}});
+ const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.detail||r.statusText);return j}
+document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{document.querySelectorAll('main>section').forEach(s=>s.classList.add('hide'));$(b.dataset.t).classList.remove('hide');({alertas:loadAl,listas:loadLi,auditoria:loadAu})[b.dataset.t]?.()});
+const badge=l=>l?`<span class="b ${esc(l)}">${esc(l)}</span>`:'';
+function matches(ms){return ms.length?`<table><tr><th>Lista</th><th>Nombre en lista</th><th>Puntaje</th><th>Nivel</th><th>Razones</th></tr>${ms.map(m=>`<tr><td>${esc(m.fuente)}</td><td>${esc(m.nombre_coincidente)}<div class="mut">${esc(m.registro?.rfc||'')} ${esc(m.registro?.remarks||'')}</div></td><td>${m.puntaje}</td><td>${badge(m.nivel)}</td><td>${m.razones.map(esc).join('<br>')}</td></tr>`).join('')}</table>`:'<p class="ok">Sin coincidencias.</p>'}
+$('go').onclick=async()=>{$('msg').textContent='Consultando…';try{
+ const body={referencia:$('ref').value||undefined,nombre:$('nombre').value||undefined,tipo:$('tipo').value||undefined,rfc:$('rfc').value||undefined,curp:$('curp').value||undefined,fecha_nacimiento:$('dob').value||undefined};
+ const r=await api('/v1/screen',{method:'POST',body:JSON.stringify(body)});$('msg').textContent='';
+ $('out').innerHTML=`<div class="card"><div class="res">${esc(r.resultado)} ${badge(r.nivel_maximo)}</div><p>Riesgo sugerido: <b>${esc(r.riesgo_sugerido)}</b> · Folio ${r.id_consulta} · <a href="#" id="cons">Constancia imprimible</a></p>
+ ${r.acciones_recomendadas.map(a=>`<p>• ${esc(a)}</p>`).join('')}${matches(r.coincidencias)}
+ ${r.descartadas_previamente.length?`<p class="mut">${r.descartadas_previamente.length} coincidencia(s) descartada(s) previamente como falso positivo.</p>`:''}
+ ${r.alertas_generadas.length?`<p><b>Alertas generadas:</b> ${r.alertas_generadas.join(', ')}</p>`:''}
+ <p class="mut">Huella de evidencia: ${esc(r.evidencia_sha256)}</p></div>`;
+ $('cons').onclick=async e=>{e.preventDefault();const h=await fetch(`/v1/screenings/${r.id_consulta}/constancia`,{headers:{'X-API-Key':$('key').value}}).then(x=>x.text());const w=window.open('');w.document.write(h);w.document.close()}
+}catch(e){$('msg').textContent='';$('out').innerHTML=`<div class="card" style="color:var(--rojo)">${esc(e.message)}</div>`}};
+const ROLES=['ENAJENANTE','ADQUIRENTE','VENDEDOR','COMPRADOR','DONANTE','DONATARIO','FIDEICOMITENTE','FIDEICOMISARIO','FIDUCIARIO','APODERADO','REPRESENTANTE','BENEFICIARIO_CONTROLADOR','SOCIO','ACCIONISTA','ARRENDADOR','ARRENDATARIO','PROMITENTE_VENDEDOR','PROMITENTE_COMPRADOR','OTORGANTE','OTRO'];
+function rowHtml(rel){return `<div class="card ${rel?'rel':'par'}" style="margin:6px 0 6px ${rel?'28px':'0'}"><div class="grid">
+ <div><label>Rol</label><select class="f-rol" style="width:100%">${ROLES.map(r=>`<option ${rel&&r=='BENEFICIARIO_CONTROLADOR'?'selected':''}>${r}</option>`).join('')}</select></div>
+ <div><label>Nombre completo / razón social</label><input class="f-nombre" style="width:100%"></div>
+ <div><label>Tipo</label><select class="f-tipo" style="width:100%"><option value="">(auto)</option><option value="F">Física</option><option value="M">Moral</option></select></div>
+ <div><label>RFC</label><input class="f-rfc" style="width:100%"></div><div><label>CURP</label><input class="f-curp" style="width:100%"></div>
+ <div><label>Fecha de nacimiento</label><input class="f-dob" placeholder="AAAA-MM-DD" style="width:100%"></div>
+ <div><label>País / nacionalidad</label><input class="f-pais" style="width:100%"></div>
+ <div><label>¿PEP?</label><select class="f-pep" style="width:100%"><option value="">No</option><option value="NACIONAL">Sí, nacional</option><option value="EXTRANJERA">Sí, extranjera</option></select></div></div>
+ <p style="margin:6px 0 0">${rel?'':'<button class="sec addrel">+ relacionado</button> '}<button class="sec del">Quitar</button></p>${rel?'':'<div class="rels"></div>'}</div>`}
+function addParte(){const d=document.createElement('div');d.innerHTML=rowHtml(false);$('partes').appendChild(d.firstElementChild)}
+$('addp').onclick=addParte;addParte();
+$('partes').addEventListener('click',e=>{const c=e.target.closest('.card');if(e.target.classList.contains('del'))c.remove();
+ if(e.target.classList.contains('addrel')){const d=document.createElement('div');d.innerHTML=rowHtml(true);c.querySelector('.rels').appendChild(d.firstElementChild)}});
+function readRow(c){const g=k=>c.querySelector('.f-'+k).value.trim()||undefined;return{rol:g('rol'),nombre:g('nombre'),tipo:g('tipo'),rfc:g('rfc'),curp:g('curp'),fecha_nacimiento:g('dob'),pais:g('pais'),declara_pep:g('pep')}}
+$('goe').onclick=async()=>{$('msge').textContent='Consultando…';try{
+ const partes=[...document.querySelectorAll('#partes>.par')].map(c=>({...readRow(c),relacionados:[...c.querySelectorAll('.rels .rel')].map(readRow).filter(x=>x.nombre||x.rfc||x.curp)})).filter(x=>x.nombre||x.rfc||x.curp);
+ const r=await api('/v1/operaciones',{method:'POST',body:JSON.stringify({expediente:$('exp').value,tipo_acto:$('acto').value,partes})});$('msge').textContent='';
+ const col=r.dictamen=='DETENER_Y_ESCALAR'?'EXACTA':r.dictamen=='REVISION_ANTES_DE_FIRMAR'?'MEDIA':'ok';
+ $('oute').innerHTML=`<div class="card"><div class="res ${col}">${esc(r.dictamen.replaceAll('_',' '))}</div><p>Expediente <b>${esc(r.expediente)}</b> · ${r.personas_consultadas} persona(s) · Folio de operación ${r.id_operacion} · Estado: <b>${esc(r.estado_actual.estado)}</b> · <a href="#" id="cons2">Constancia imprimible</a></p>
+ ${r.hallazgos.length?`<h4>Hallazgos</h4><ul>${r.hallazgos.map(h=>`<li><b>${esc(h.parte)}</b> (${esc(h.rol)}) ${badge(h.nivel)} – ${esc(h.listas.join(', '))}${h.alertas.length?' · alertas '+h.alertas.join(', '):''}<br><span class="mut">${esc((h.acciones||[]).join(' | '))}</span></li>`).join('')}</ul>`:'<p class="ok">Sin coincidencias relevantes.</p>'}
+ ${r.advertencias.length?`<h4>Advertencias para el expediente</h4><ul>${r.advertencias.map(a=>`<li>${esc(a)}</li>`).join('')}</ul>`:''}
+ <p class="mut">Huella: ${esc(r.evidencia_sha256)}</p></div>`;
+ $('cons2').onclick=async ev=>{ev.preventDefault();const h=await fetch(`/v1/operaciones/${r.id_operacion}/constancia`,{headers:{'X-API-Key':$('key').value}}).then(x=>x.text());const w=window.open('');w.document.write(h);w.document.close()}
+}catch(e){$('msge').textContent='';$('oute').innerHTML=`<div class="card" style="color:var(--rojo)">${esc(e.message)}</div>`}};
+async function loadAl(){try{const a=await api('/v1/alerts'+($('st').value?'?status='+$('st').value:''));
+ $('al').innerHTML=a.length?`<table><tr><th>#</th><th>Sujeto</th><th>Lista</th><th>Nivel</th><th>Estado</th><th>Vence</th><th></th></tr>${a.map(x=>`<tr><td>${x.id}</td><td>${esc(x.subject_name||'')}<div class="mut">${esc(x.ref||'')}</div></td><td>${esc(x.source_code)}<div class="mut">${esc(x.matched_name)}</div></td><td>${badge(x.level)} ${x.score.toFixed(0)}</td><td>${esc(x.status)}${x.vencida?' <span class="b ALTA">VENCIDA</span>':''}</td><td>${esc(x.due_at.slice(0,16))}</td><td>${['ABIERTA','PENDIENTE_APROBACION'].includes(x.status)?`<button class="sec" onclick="res(${x.id},'FALSO_POSITIVO')">Falso +</button> <button class="sec" onclick="res(${x.id},'CONFIRMADA')">Confirmar</button>${x.status=='PENDIENTE_APROBACION'?` <button class="sec" onclick="res(${x.id},'DEVOLVER')">Devolver</button>`:''}`:''}</td></tr>`).join('')}</table>`:'<p class="mut">Sin alertas.</p>'}catch(e){$('al').textContent=e.message}}
+$('ra').onclick=loadAl;$('st').onchange=loadAl;
+async function res(id,r){const n=prompt(`Justificación para ${r} (mín. 10 caracteres):`);if(!n)return;try{await api(`/v1/alerts/${id}/resolve`,{method:'POST',body:JSON.stringify({resolucion:r,nota:n})});loadAl()}catch(e){alert(e.message)}}
+async function loadLi(){try{const l=await api('/v1/lists');$('li').innerHTML=`<table><tr><th>Fuente</th><th>Autoridad</th><th>Severidad</th><th>Registros</th><th>Última carga</th><th></th></tr>${l.map(x=>`<tr><td><b>${esc(x.code)}</b><div class="mut">${esc(x.name)}</div></td><td>${esc(x.authority)}</td><td>${badge(x.severity)}</td><td>${x.ultima_version?.entry_count??'—'}</td><td>${esc(x.ultima_version?.fetched_at?.slice(0,16)||'sin cargar')}</td><td>${x.desactualizada?'<span class="b ALTA">DESACTUALIZADA</span>':'<span class="ok">OK</span>'}</td></tr>`).join('')}</table>`}catch(e){$('li').textContent=e.message}}
+async function loadAu(){try{const v=await api('/v1/audit/verify');const a=await api('/v1/audit?limit=50');$('au').innerHTML=`<p>Integridad de la bitácora: <b class="${v.ok?'ok':'EXACTA'}">${v.ok?'ÍNTEGRA':'ALTERADA'}</b> (${v.registros} registros)</p><table><tr><th>#</th><th>Fecha</th><th>Usuario</th><th>Acción</th><th>Detalle</th></tr>${a.map(x=>`<tr><td>${x.seq}</td><td>${esc(x.ts.slice(0,19))}</td><td>${esc(x.actor)}</td><td>${esc(x.action)}</td><td class="mut">${esc(x.detail.slice(0,140))}</td></tr>`).join('')}</table>`}catch(e){$('au').textContent=e.message}}
+</script>
+</body>
+</html>

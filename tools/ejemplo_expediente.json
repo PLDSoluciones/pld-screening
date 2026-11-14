@@ -1,0 +1,12 @@
+{
+  "expediente": "ESC-2026-0457",
+  "tipo_acto": "COMPRAVENTA_INMUEBLE",
+  "partes": [
+    {"rol": "ENAJENANTE", "nombre": "María Fernanda López Hernández", "tipo": "F", "curp": "LOHF850214MDFPRR08",
+     "rfc": "LOHF850214AB1", "fecha_nacimiento": "1985-02-14", "pais": "México", "declara_pep": ""},
+    {"rol": "ADQUIRENTE", "nombre": "Desarrollos Ejemplo SA de CV", "tipo": "M", "rfc": "DEJ120101AB1",
+     "relacionados": [
+       {"rol": "BENEFICIARIO_CONTROLADOR", "nombre": "Juan Pérez López", "curp": "PELJ800101HDFRPN09", "fecha_nacimiento": "1980-01-01"},
+       {"rol": "REPRESENTANTE", "nombre": "Ana Gómez Ruiz", "rfc": "GORA900505XX1"}]}
+  ]
+}

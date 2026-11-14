@@ -1,0 +1,19 @@
+services:
+  api:
+    build: .
+    restart: unless-stopped
+    ports: ["127.0.0.1:8000:8000"]   # exponer SOLO detrás de un proxy HTTPS (ver README)
+    env_file: .env
+    environment:
+      PLD_COUNTRY_RISK: /data/country_risk.csv
+    volumes: ["pld_data:/data"]
+  worker:                              # actualiza OFAC/ONU/SAT cada PLD_UPDATE_EVERY_H horas y procesa data/inbox
+    build: .
+    restart: unless-stopped
+    command: ["python", "-m", "pldscreen", "daemon"]
+    env_file: .env
+    environment:
+      PLD_COUNTRY_RISK: /data/country_risk.csv
+    volumes: ["pld_data:/data"]
+volumes:
+  pld_data:

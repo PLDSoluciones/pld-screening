@@ -1,0 +1,21 @@
+# Datos sensibles: NUNCA suba esto a GitHub
+.env
+data/*.db
+data/*.db-wal
+data/*.db-shm
+data/raw/
+data/inbox/
+data/backups/
+*.db
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+
+# Claves y datos locales de prueba
+data/clave_admin.txt
+clave_admin.txt
+
+# macOS
+.DS_Store

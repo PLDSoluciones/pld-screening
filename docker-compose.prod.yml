@@ -1,0 +1,28 @@
+# Producción: API + worker + HTTPS automático (Caddy). Uso:  docker compose -f docker-compose.prod.yml up -d --build
+services:
+  api:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      PLD_COUNTRY_RISK: /data/country_risk.csv
+    volumes: ["pld_data:/data"]
+  worker:
+    build: .
+    restart: unless-stopped
+    command: ["python", "-m", "pldscreen", "daemon"]
+    env_file: .env
+    environment:
+      PLD_COUNTRY_RISK: /data/country_risk.csv
+    volumes: ["pld_data:/data"]
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    env_file: .env
+    volumes: ["./Caddyfile:/etc/caddy/Caddyfile:ro", "caddy_data:/data", "caddy_config:/config"]
+    depends_on: [api]
+volumes:
+  pld_data:
+  caddy_data:
+  caddy_config:
