@@ -117,6 +117,8 @@ def init_db(conn: sqlite3.Connection) -> None:
     for c in ("pw_hash", "pw_salt"):
         if c not in cols:
             conn.execute(f"ALTER TABLE users ADD COLUMN {c} TEXT")
+    if "must_change" not in cols:
+        conn.execute("ALTER TABLE users ADD COLUMN must_change INTEGER DEFAULT 0")
     conn.execute("CREATE TABLE IF NOT EXISTS sessions(token_hash TEXT PRIMARY KEY, name TEXT, role TEXT, "
                  "created_at TEXT, expires_at TEXT)")
     for s in SOURCES:

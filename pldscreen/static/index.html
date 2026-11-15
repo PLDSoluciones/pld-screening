@@ -222,7 +222,7 @@ function demoBar(){const c=ME&&ME.cuenta,b=$('demobar');if(!c||c.plan!='DEMO'){b
  b.innerHTML=t+(c.contacto?` · Contacto: <b>${esc(c.contacto)}</b>`:'');b.classList.remove('hide')}
 function showApp(){$('login').classList.add('hide');$('registro').classList.add('hide');$('app').classList.remove('hide');$('quien').textContent=`${ME.usuario} · ${ME.rol}`;
  const demo=!!(ME.cuenta&&ME.cuenta.plan=='DEMO');
- document.querySelectorAll('nav [data-t]').forEach(b=>{const t=b.dataset.t;b.classList.toggle('hide',!!((b.dataset.min&&RANK[ME.rol]<+b.dataset.min)||(demo&&!['consulta','listas','ayuda'].includes(t))))});demoBar();openTab('consulta')}
+ document.querySelectorAll('nav [data-t]').forEach(b=>{const t=b.dataset.t;b.classList.toggle('hide',!!((b.dataset.min&&RANK[ME.rol]<+b.dataset.min)||(demo&&!['consulta','listas','ayuda'].includes(t))))});demoBar();openTab('consulta');if(ME.debe)forzarCambio()}
 async function api(p,o={}){const r=await fetch(p,{...o,headers:{'X-API-Key':TOK(),'Content-Type':'application/json'}});
  const j=await r.json().catch(()=>({}));if(r.status==401&&p!='/v1/login'){showLogin('Su sesión terminó. Ingrese de nuevo.')}
  if(r.status==402&&ME&&ME.cuenta&&p!='/v1/me'){api('/v1/me').then(m=>{ME.cuenta=m.cuenta;demoBar()}).catch(()=>{})}
@@ -230,10 +230,10 @@ async function api(p,o={}){const r=await fetch(p,{...o,headers:{'X-API-Key':TOK(
  if(!r.ok)throw new Error(typeof j.detail=='string'?j.detail:(r.statusText||'Error'));return j}
 async function doLogin(){$('lerr').textContent='';$('lgo').disabled=true;try{
  const r=await api('/v1/login',{method:'POST',body:JSON.stringify({usuario:$('lu').value,contrasena:$('lp').value})});
- try{sessionStorage.setItem('tok',r.token)}catch(e){};const m=await api('/v1/me');ME={usuario:m.usuario,rol:m.rol,cuenta:m.cuenta};showApp()}catch(e){$('lerr').textContent=e.message}$('lgo').disabled=false}
+ try{sessionStorage.setItem('tok',r.token)}catch(e){};const m=await api('/v1/me');ME={usuario:m.usuario,rol:m.rol,cuenta:m.cuenta,debe:m.debe_cambiar_contrasena};showApp()}catch(e){$('lerr').textContent=e.message}$('lgo').disabled=false}
 $('lgo').onclick=doLogin;$('lp').onkeydown=e=>{if(e.key=='Enter')doLogin()};$('lu').onkeydown=e=>{if(e.key=='Enter')$('lp').focus()};
 $('salir').onclick=async()=>{try{await api('/v1/logout',{method:'POST'})}catch(e){}showLogin('')};
-(async()=>{if(!TOK())return showLogin();try{const m=await api('/v1/me');ME={usuario:m.usuario,rol:m.rol,cuenta:m.cuenta};showApp()}catch(e){showLogin()}})();
+(async()=>{if(!TOK())return showLogin();try{const m=await api('/v1/me');ME={usuario:m.usuario,rol:m.rol,cuenta:m.cuenta,debe:m.debe_cambiar_contrasena};showApp()}catch(e){showLogin()}})();
 function openTab(t){document.querySelectorAll('main>section').forEach(x=>x.classList.add('hide'));$(t).classList.remove('hide');
  document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('on',b.dataset.t==t));({inicio:loadIn,alertas:loadAl,historial:()=>loadHi(true),listas:loadLi,auditoria:loadAu,usuarios:loadUs,clientes:loadCl,sistema:loadSis})[t]?.()}
 document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>openTab(b.dataset.t));
@@ -363,8 +363,10 @@ let _tt;function toast(m,err){const t=$('toast');t.textContent=m;t.style.backgro
 window.alert=m=>toast(String(m));
 $('mica').onclick=()=>{$('dctau').textContent=`${ME.usuario} · ${ME.rol}`;['cpa','cpn','cpr'].forEach(i=>$(i).value='');$('cperr').textContent='';$('dcta').showModal()};
 $('cpx').onclick=()=>$('dcta').close();
+function forzarCambio(){$('dctau').textContent=`${ME.usuario} · Por seguridad debe elegir una contraseña nueva antes de continuar.`;['cpa','cpn','cpr'].forEach(i=>$(i).value='');$('cperr').textContent='';$('cpx').classList.add('hide');if(!$('dcta').open)$('dcta').showModal()}
+$('dcta').addEventListener('cancel',e=>{if(ME&&ME.debe)e.preventDefault()});
 $('cpok').onclick=async()=>{$('cperr').textContent='';try{if($('cpn').value!==$('cpr').value)throw new Error('Las contraseñas nuevas no coinciden.');if($('cpn').value.length<10)throw new Error('Use al menos 10 caracteres.');
- await api('/v1/me/password',{method:'POST',body:JSON.stringify({actual:$('cpa').value,nueva:$('cpn').value})});$('dcta').close();toast('Contraseña actualizada. Se cerraron sus otras sesiones.')}catch(e){$('cperr').textContent=e.message}};
+ await api('/v1/me/password',{method:'POST',body:JSON.stringify({actual:$('cpa').value,nueva:$('cpn').value})});ME.debe=false;$('cpx').classList.remove('hide');$('dcta').close();toast('Contraseña actualizada.');if(TOK()){try{const r2=await api('/v1/login',{method:'POST',body:JSON.stringify({usuario:ME.usuario,contrasena:$('cpn').value})});sessionStorage.setItem('tok',r2.token)}catch(e){}}}catch(e){$('cperr').textContent=e.message}};
 async function loadSis(){try{const s=await api('/v1/sistema'),t=s.totales,fh=h=>h?esc(fdt(h)):'—';
  $('sit').innerHTML=[['Consultas (24 h)',t.consultas_24h],['Consultas totales',t.consultas],['Alertas abiertas',t.alertas_abiertas],['Personas monitoreadas',t.personas_monitoreadas],['Registros en listas',t.registros_en_listas.toLocaleString('es-MX')],['Usuarios activos',t.usuarios_activos],['Clientes',t.clientes]].map(x=>`<div class="tile"><b>${x[1]}</b><span>${x[0]}</span></div>`).join('');
  $('sid').innerHTML=`<table><tr><td>Versión</td><td><b>${esc(s.version)}</b></td></tr><tr><td>Hora del servidor (UTC)</td><td>${fh(s.hora_servidor_utc)}</td></tr><tr><td>Última carga de listas</td><td>${fh(s.ultima_carga_listas)}</td></tr>
@@ -391,9 +393,11 @@ $('clb').onclick=loadCl;$('cle').onchange=loadCl;
 $('clcsv').onclick=async()=>{const h=await fetch('/v1/clientes/export.csv',{headers:{'X-API-Key':TOK()}});const a=document.createElement('a');a.href=URL.createObjectURL(await h.blob());a.download='clientes.csv';a.click()};
 $('clnew').onclick=async()=>{const o=prompt('Organización:');if(!o)return;const n=prompt('Nombre del contacto:');if(!n)return;const e=prompt('Correo (será su usuario):');if(!e)return;const p=prompt('Contraseña inicial (mín. 10 caracteres):');if(!p)return;
  const pg=confirm('¿Ya es cliente de pago?\nAceptar = PAGADO · Cancelar = DEMO');try{await api('/v1/clientes',{method:'POST',body:JSON.stringify({nombre:n,organizacion:o,email:e,contrasena:p,plan:pg?'PAGADO':'DEMO'})});loadCl()}catch(x){alert(x.message)}};
-async function loadUs(){try{const u=await api('/v1/users');$('ul').innerHTML=`<table><tr><th>Usuario</th><th>Rol</th><th>Estado</th><th>Último acceso</th><th></th></tr>${u.map(x=>`<tr><td><b>${esc(x.usuario)}</b></td><td><select onchange="cambiaRol('${esc(x.usuario)}',this.value)" ${x.usuario==ME.usuario?'disabled':''}>${['analista','supervisor','admin'].map(r=>`<option ${r==x.rol?'selected':''}>${r}</option>`).join('')}</select></td><td>${x.activo?'<span class="ok">Activo</span>':'<span class="mut">Desactivado</span>'}${x.puede_entrar_web?'':'<div class="mut">solo integración</div>'}</td><td>${x.ultimo_acceso?esc(fdt(x.ultimo_acceso)):'<span class="mut">nunca</span>'}</td><td><button class="sec" onclick="cambiarPw('${esc(x.usuario)}')">Cambiar contraseña</button> <button class="sec" onclick="alterna('${esc(x.usuario)}',${x.activo})">${x.activo?'Desactivar':'Activar'}</button></td></tr>`).join('')}</table>`}catch(e){$('ul').textContent=e.message}}
+async function loadUs(){try{const u=await api('/v1/users');$('ul').innerHTML=`<table><tr><th>Usuario</th><th>Rol</th><th>Estado</th><th>Último acceso</th><th></th></tr>${u.map(x=>`<tr><td><b>${esc(x.usuario)}</b></td><td><select onchange="cambiaRol('${esc(x.usuario)}',this.value)" ${x.usuario==ME.usuario?'disabled':''}>${['analista','supervisor','admin'].map(r=>`<option ${r==x.rol?'selected':''}>${r}</option>`).join('')}</select></td><td>${x.activo?'<span class="ok">Activo</span>':'<span class="mut">Desactivado</span>'}${x.puede_entrar_web?'':'<div class="mut">solo integración</div>'}</td><td>${x.ultimo_acceso?esc(fdt(x.ultimo_acceso)):'<span class="mut">nunca</span>'}</td><td><button class="sec" onclick="cambiarPw('${esc(x.usuario)}')">Cambiar contraseña</button> ${x.usuario==ME.usuario?'':`<button class="sec" onclick="restablece('${esc(x.usuario)}')">Restablecer</button>`}${x.debe_cambiar_contrasena?' <span class="b MEDIA">cambio pendiente</span>':''} <button class="sec" onclick="alterna('${esc(x.usuario)}',${x.activo})">${x.activo?'Desactivar':'Activar'}</button></td></tr>`).join('')}</table>`}catch(e){$('ul').textContent=e.message}}
 $('nuc').onclick=async()=>{$('nmsg').textContent='';try{await api('/v1/users',{method:'POST',body:JSON.stringify({usuario:$('nu').value.trim(),rol:$('nr').value,contrasena:$('np').value})});$('nu').value='';$('np').value='';$('nmsg').textContent='Usuario creado.';loadUs()}catch(e){$('nmsg').textContent=e.message}};
 async function cambiaRol(n,r){try{await api(`/v1/users/${encodeURIComponent(n)}/rol`,{method:'POST',body:JSON.stringify({rol:r})});toast(`Rol de ${n}: ${r}. Aplica al volver a entrar.`)}catch(e){toast(e.message,1)}loadUs()}
+async function restablece(n){if(!confirm(`Se generará una contraseña temporal para ${n} y se cerrarán sus sesiones. ¿Continuar?`))return;
+ try{const r=await api(`/v1/users/${encodeURIComponent(n)}/restablecer`,{method:'POST'});prompt(`Contraseña temporal de ${n} (cópiela ahora: no se volverá a mostrar). Deberá cambiarla al entrar.`,r.temporal);loadUs()}catch(e){toast(e.message,1)}}
 async function cambiarPw(n){const p=prompt(`Nueva contraseña para ${n} (mín. 10 caracteres):`);if(!p)return;try{await api(`/v1/users/${encodeURIComponent(n)}/password`,{method:'POST',body:JSON.stringify({contrasena:p})});alert('Contraseña actualizada.')}catch(e){alert(e.message)}}
 async function alterna(n,act){try{await api(`/v1/users/${encodeURIComponent(n)}/${act?'desactivar':'activar'}`,{method:'POST'});loadUs()}catch(e){alert(e.message)}}
 async function loadAl(){try{const a=await api('/v1/alerts'+($('st').value?'?status='+$('st').value:''));
@@ -415,7 +419,7 @@ $('rgo').onclick=async()=>{$('rerr').textContent='';$('rgo').disabled=true;try{
  if($('rp').value.length<10)throw new Error('La contraseña debe tener al menos 10 caracteres.');
  const rg=await api('/v1/registro',{method:'POST',body:JSON.stringify({nombre:$('rn').value,organizacion:$('ro').value,tipo:$('rt').value,email:em,telefono:$('rtel').value,contrasena:$('rp').value,acepta:true,web:$('rweb').value})});
  const r=await api('/v1/login',{method:'POST',body:JSON.stringify({usuario:rg.usuario,contrasena:$('rp').value})}).catch(()=>null);
- if(r){try{sessionStorage.setItem('tok',r.token)}catch(e){};const m=await api('/v1/me');ME={usuario:m.usuario,rol:m.rol,cuenta:m.cuenta};showApp()}
+ if(r){try{sessionStorage.setItem('tok',r.token)}catch(e){};const m=await api('/v1/me');ME={usuario:m.usuario,rol:m.rol,cuenta:m.cuenta,debe:m.debe_cambiar_contrasena};showApp()}
  else{$('registro').classList.add('hide');$('login').classList.remove('hide');$('lerr').textContent='Demo creada. Ingrese con el usuario que se le asignó (su correo antes de la @) y su contraseña.'}
  }catch(e){$('rerr').textContent=e.message}$('rgo').disabled=false};
 </script>

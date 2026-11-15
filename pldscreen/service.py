@@ -77,7 +77,7 @@ class Service(ClientesMixin, AdminMixin):
         if len(password or "") < self.MIN_PASSWORD:
             raise ServiceError(f"La contraseña debe tener al menos {self.MIN_PASSWORD} caracteres")
 
-    def create_user(self, name: str, role: str, password: str | None = None) -> str:
+    def create_user(self, name: str, role: str, password: str | None = None, forzar_cambio: bool = False) -> str:
         """Crea usuario. Devuelve una API key (para integraciones). Con password también puede entrar por la página."""
         if role not in ROLES:
             raise ServiceError(f"Rol inválido. Use: {', '.join(ROLES)}")
@@ -93,22 +93,23 @@ class Service(ClientesMixin, AdminMixin):
         with self.lock, dbm.tx(self.conn):
             if self.conn.execute("SELECT 1 FROM users WHERE name=?", (name,)).fetchone():
                 raise ServiceError("Ese usuario ya existe", 409)
-            self.conn.execute("INSERT INTO users(name,role,key_hash,created_at,pw_hash,pw_salt) VALUES(?,?,?,?,?,?)",
-                              (name, role, hashlib.sha256(key.encode()).hexdigest(), dbm.now(), pw, salt))
+            self.conn.execute("INSERT INTO users(name,role,key_hash,created_at,pw_hash,pw_salt,must_change) VALUES(?,?,?,?,?,?,?)",
+                              (name, role, hashlib.sha256(key.encode()).hexdigest(), dbm.now(), pw, salt,
+                               1 if (forzar_cambio and password) else 0))
             dbm.audit(self.conn, "sistema", "USUARIO_CREADO", {"usuario": name, "rol": role,
                                                               "con_contrasena": bool(password)})
         return key
 
-    def set_password(self, name: str, password: str, actor: str = "sistema") -> None:
+    def set_password(self, name: str, password: str, actor: str = "sistema", forzar_cambio: bool = False) -> None:
         self._check_password(password)
         salt = secrets.token_hex(16)
         with self.lock, dbm.tx(self.conn):
-            cur = self.conn.execute("UPDATE users SET pw_hash=?, pw_salt=? WHERE name=? AND active=1",
-                                    (self._pw_hash(password, salt), salt, name))
+            cur = self.conn.execute("UPDATE users SET pw_hash=?, pw_salt=?, must_change=? WHERE name=? AND active=1",
+                                    (self._pw_hash(password, salt), salt, 1 if forzar_cambio else 0, name))
             if cur.rowcount == 0:
                 raise ServiceError("Usuario no encontrado", 404)
             self.conn.execute("DELETE FROM sessions WHERE name=?", (name,))
-            dbm.audit(self.conn, actor, "CONTRASENA_CAMBIADA", {"usuario": name})
+            dbm.audit(self.conn, actor, "CONTRASENA_CAMBIADA", {"usuario": name, "debe_cambiarla": forzar_cambio})
 
     def set_user_active(self, name: str, active: bool, actor: str) -> None:
         with self.lock, dbm.tx(self.conn):
@@ -123,8 +124,9 @@ class Service(ClientesMixin, AdminMixin):
         with self.lock:
             acc = self.ultimos_accesos()
             return [{"usuario": r["name"], "rol": r["role"], "activo": bool(r["active"]),
-                     "puede_entrar_web": bool(r["pw_hash"]), "creado": r["created_at"], "ultimo_acceso": acc.get(r["name"])}
-                    for r in self.conn.execute("SELECT name,role,active,pw_hash,created_at FROM users ORDER BY name")]
+                     "puede_entrar_web": bool(r["pw_hash"]), "creado": r["created_at"], "ultimo_acceso": acc.get(r["name"]),
+                     "debe_cambiar_contrasena": bool(r["must_change"])}
+                    for r in self.conn.execute("SELECT name,role,active,pw_hash,created_at,must_change FROM users ORDER BY name")]
 
     def login(self, usuario: str, contrasena: str) -> dict | None:
         with self.lock:
@@ -157,7 +159,7 @@ class Service(ClientesMixin, AdminMixin):
             r = self.conn.execute("SELECT name,role FROM users WHERE key_hash=? AND active=1", (h,)).fetchone()
             if not r:
                 r = self.conn.execute(
-                    "SELECT s.name name, s.role role FROM sessions s JOIN users u ON u.name=s.name AND u.active=1 "
+                    "SELECT s.name name, s.role role, u.must_change mc FROM sessions s JOIN users u ON u.name=s.name AND u.active=1 "
                     "WHERE s.token_hash=? AND s.expires_at > ?", (h, dbm.now())).fetchone()
         return dict(r) if r else None
 

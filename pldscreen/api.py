@@ -126,6 +126,8 @@ def create_app(service: Service | None = None) -> FastAPI:
         if not u:
             q.append(now)
             raise HTTPException(401, "API key inválida o ausente (cabecera X-API-Key)")
+        if u.get("mc") and request.url.path not in ("/v1/me", "/v1/logout", "/v1/me/password"):
+            raise HTTPException(403, "Debe cambiar su contraseña antes de continuar (menú «Mi cuenta»).")
         cuenta = svc.info_cuenta(u["name"])
         u["demo"] = bool(cuenta and cuenta["plan"] == "DEMO")
         u["cuenta"] = cuenta
@@ -180,7 +182,7 @@ def create_app(service: Service | None = None) -> FastAPI:
 
     @app.get("/v1/me", summary="Usuario de la sesión actual")
     def me(u: dict = Depends(user)):
-        r = {"usuario": u["name"], "rol": u["role"]}
+        r = {"usuario": u["name"], "rol": u["role"], "debe_cambiar_contrasena": bool(u.get("mc"))}
         if u.get("cuenta"):
             r["cuenta"] = u["cuenta"]
         return r
@@ -223,13 +225,20 @@ def create_app(service: Service | None = None) -> FastAPI:
 
     @app.post("/v1/users", summary="Crea un usuario con contraseña (admin)")
     def users_create(b: NuevoUsuario, u: dict = Depends(need("admin"))):
-        run(svc.create_user, b.usuario, b.rol, b.contrasena)
+        run(svc.create_user, b.usuario, b.rol, b.contrasena, True)
         return {"ok": True, "usuario": b.usuario}
 
     @app.post("/v1/users/{name}/password", summary="Cambia la contraseña de un usuario (admin)")
     def users_pw(name: str, b: NuevaContrasena, u: dict = Depends(need("admin"))):
-        run(svc.set_password, name, b.contrasena, u["name"])
+        run(svc.set_password, name, b.contrasena, u["name"], True)
         return {"ok": True}
+
+    @app.post("/v1/users/{name}/restablecer", summary="Genera una contraseña temporal para un usuario (admin)")
+    def users_reset(name: str, u: dict = Depends(need("admin"))):
+        if name == u["name"]:
+            raise HTTPException(400, "Para su propia contraseña use «Mi cuenta»")
+        return {"usuario": name, "temporal": run(svc.restablecer_contrasena, name, u["name"]),
+                "aviso": "Entréguela por un canal seguro. Se muestra una sola vez y deberá cambiarse al entrar."}
 
     @app.post("/v1/users/{name}/{accion}", summary="Activa o desactiva un usuario (admin)")
     def users_toggle(name: str, accion: str, u: dict = Depends(need("admin"))):

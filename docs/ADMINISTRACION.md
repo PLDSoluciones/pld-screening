@@ -7,3 +7,5 @@
 - **Ayuda** (todos): guía de uso, cómo leer los niveles de coincidencia y qué listas cubre el sistema.
 
 Haga un respaldo antes de cada actualización y guárdelo cifrado fuera del servidor.
+
+- **Recuperación de contraseñas:** botón *Restablecer* (contraseña temporal de un solo uso) y cambio obligatorio en el primer ingreso. Ver RECUPERACION_CUENTA.md.

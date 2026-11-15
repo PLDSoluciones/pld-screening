@@ -23,6 +23,13 @@ class AdminMixin:
             raise ServiceError("La nueva contraseña debe ser distinta de la actual")
         self.set_password(usuario, nueva, usuario)  # valida largo y cierra las demás sesiones
 
+    def restablecer_contrasena(self, name: str, actor: str) -> str:
+        """Genera una contraseña temporal aleatoria (se muestra una sola vez); el usuario deberá cambiarla al entrar."""
+        alfabeto = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789"  # sin caracteres ambiguos
+        temporal = "".join(secrets.choice(alfabeto) for _ in range(12))
+        self.set_password(name, temporal, actor, forzar_cambio=True)
+        return temporal
+
     def set_role(self, name: str, role: str, actor: str) -> None:
         from .service import ROLES, ServiceError
         if role not in ROLES:

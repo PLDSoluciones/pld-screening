@@ -73,3 +73,35 @@ def test_depurar_demos(env):
     assert c.post("/v1/sistema/depurar-demos", headers=ha).json()["consultas_borradas"] == 0  # aún vigente
     svc.conn.execute("UPDATE customers SET demo_expira='2000-01-01T00:00:00+00:00'")
     assert c.post("/v1/sistema/depurar-demos", headers=ha).json()["consultas_borradas"] == 1
+
+
+def test_cambio_forzado_y_restablecer(env):
+    svc, c = env
+    ha = tok(c, "admin1", "AdminClave2026!")
+    # usuario creado por el admin: debe cambiar la contraseña al entrar
+    assert c.post("/v1/users", json={"usuario": "beto", "rol": "analista", "contrasena": "Inicial2026!!"}, headers=ha).status_code == 200
+    hb = tok(c, "beto", "Inicial2026!!")
+    assert c.get("/v1/me", headers=hb).json()["debe_cambiar_contrasena"] is True
+    assert c.post("/v1/screen", json={"nombre": "Juan Perez"}, headers=hb).status_code == 403
+    assert c.post("/v1/me/password", json={"actual": "Inicial2026!!", "nueva": "ElegidaPorBeto26"}, headers=hb).status_code == 200
+    hb = tok(c, "beto", "ElegidaPorBeto26")
+    assert c.get("/v1/me", headers=hb).json()["debe_cambiar_contrasena"] is False
+    assert c.post("/v1/screen", json={"nombre": "Juan Perez"}, headers=hb).status_code == 200
+    # restablecer: contraseña temporal aleatoria, un solo uso, cierra sesiones
+    r = c.post("/v1/users/beto/restablecer", headers=ha)
+    t = r.json()["temporal"]
+    assert r.status_code == 200 and len(t) == 12
+    assert c.get("/v1/me", headers=hb).status_code == 401  # su sesión anterior se cerró
+    assert c.post("/v1/login", json={"usuario": "beto", "contrasena": "ElegidaPorBeto26"}).status_code == 401
+    ht = tok(c, "beto", t)
+    assert c.get("/v1/me", headers=ht).json()["debe_cambiar_contrasena"] is True
+    # la contraseña temporal no queda en la bitácora
+    assert t not in str(svc.audit_tail(50))
+    assert c.post("/v1/users/admin1/restablecer", headers=ha).status_code == 400  # a uno mismo: Mi cuenta
+    assert c.post("/v1/users/beto/restablecer", headers=hb).status_code in (401, 403)
+
+
+def test_cli_o_integracion_no_forza_cambio(env):
+    _, c = env
+    h = tok(c, "ana", "ClaveAna2026!")  # creada sin forzar (CLI/fixture)
+    assert c.get("/v1/me", headers=h).json()["debe_cambiar_contrasena"] is False

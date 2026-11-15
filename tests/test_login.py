@@ -22,7 +22,7 @@ def test_login_ok_y_uso_de_sesion(client):
     assert r.status_code == 200 and r.json()["rol"] == "analista"
     tok = r.json()["token"]
     h = {"X-API-Key": tok}
-    assert client.get("/v1/me", headers=h).json() == {"usuario": "ana", "rol": "analista"}
+    assert client.get("/v1/me", headers=h).json() == {"usuario": "ana", "rol": "analista", "debe_cambiar_contrasena": False}
     assert client.post("/v1/screen", json={"nombre": "Persona Inventada Cualquiera"}, headers=h).status_code == 200
     assert client.get("/v1/users", headers=h).status_code == 403      # analista no administra usuarios
     assert client.post("/v1/logout", headers=h).status_code == 200
