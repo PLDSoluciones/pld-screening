@@ -12,3 +12,12 @@ def test_carga_49bis_desde_inbox(svc, s_inbox=None):
     assert out["nivel_maximo"] in ("EXACTA", "ALTA")
     out2 = svc.screen({"nombre": "Otra Ficticia", "rfc": "BBB020202BBB", "tipo": "M"}, "t", persist=False)
     assert not any(m["fuente"] == "SAT_49BIS" for m in out2["coincidencias"])  # desvirtuado = inactivo
+
+
+def test_estado_de_listas_no_marca_manuales_como_desactualizadas(svc):
+    est = {x["code"]: x for x in svc.lists_status()}
+    assert est["SAT_49BIS"]["modo"] == "MANUAL" and est["SAT_49BIS"]["estado"] == "SIN CARGAR"
+    assert not est["SAT_49BIS"]["desactualizada"]
+    assert est["EXT_PEP"]["modo"] == "API" and est["EXT_PEP"]["estado"] == "NO CONFIGURADA"
+    assert est["OFAC_SDN"]["modo"] == "AUTOMATICA" and est["OFAC_SDN"]["estado"] == "OK"
+    assert est["LPB_UIF"]["modo"] == "MANUAL" and est["LPB_UIF"]["estado"] == "OK"

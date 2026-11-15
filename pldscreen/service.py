@@ -558,8 +558,19 @@ class Service:
                 age_h = None
                 if v:
                     age_h = round((_utc() - datetime.fromisoformat(v["fetched_at"])).total_seconds() / 3600, 1)
+                code = s["code"]
+                if code in fetch.AUTO_SOURCES:
+                    modo = "AUTOMATICA"
+                    estado = "SIN CARGAR" if age_h is None else ("OK" if age_h <= 48 else "DESACTUALIZADA")
+                elif code in ("EXT_PEP", "EXT_SANC"):
+                    modo = "API"
+                    estado = "CONECTADA" if self.provider else "NO CONFIGURADA"
+                else:
+                    modo = "MANUAL"
+                    estado = "SIN CARGAR" if age_h is None else ("OK" if age_h <= 24 * 30 else "REVISAR (más de 30 días)")
                 out.append({**s, "ultima_version": dict(v) if v else None, "antiguedad_horas": age_h,
-                            "desactualizada": (age_h is None) or (age_h > 48 and s["code"] in fetch.AUTO_SOURCES)})
+                            "modo": modo, "estado": estado,
+                            "desactualizada": estado in ("DESACTUALIZADA",) or estado.startswith("REVISAR")})
             return out
 
     def import_list(self, source: str, data: bytes, fmt: str = "generic", filename: str = "carga_manual",
@@ -589,8 +600,8 @@ class Service:
         out = []
         for code in sources or fetch.AUTO_SOURCES:
             try:
+                res = fetch.update_source(self.conn, self.s, code, actor, lock=self.lock)
                 with self.lock:
-                    res = fetch.update_source(self.conn, self.s, code, actor)
                     res["monitoreo"] = self._monitor_delta(code, res.get("delta_external_ids", []), actor)
                 res.pop("delta_external_ids", None)
                 out.append(res)

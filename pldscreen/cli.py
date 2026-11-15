@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -117,8 +118,25 @@ def main(argv=None) -> int:
                     break
                 time.sleep(svc.s.update_interval_hours * 3600)
         elif a.cmd == "serve":
+            import threading
             import uvicorn
             from .api import create_app
+
+            def _auto():  # actualización automática en segundo plano mientras la página esté encendida
+                time.sleep(15)
+                while True:
+                    try:
+                        print(time.strftime("%F %T"), "actualización automática de listas…", flush=True)
+                        r = svc.update_lists(actor="auto")
+                        print(json.dumps([{k: x.get(k) for k in ("source", "total", "added", "changed", "removed", "error")
+                                           if k in x} for x in r], ensure_ascii=False), flush=True)
+                        print(json.dumps(svc.process_inbox("auto"), ensure_ascii=False), flush=True)
+                    except Exception as e:  # noqa: BLE001
+                        print("Error en actualización automática:", e, flush=True)
+                    time.sleep(max(0.1, svc.s.update_interval_hours) * 3600)
+
+            if os.environ.get("PLD_AUTO_UPDATE", "1") != "0":
+                threading.Thread(target=_auto, daemon=True, name="auto-update").start()
             uvicorn.run(create_app(svc), host=a.host, port=a.port)
     except ServiceError as e:
         print("Error:", e, file=sys.stderr)

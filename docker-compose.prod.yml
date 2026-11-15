@@ -6,6 +6,7 @@ services:
     env_file: .env
     environment:
       PLD_COUNTRY_RISK: /data/country_risk.csv
+      PLD_AUTO_UPDATE: "0"   # el servicio «worker» ya actualiza las listas
     volumes: ["pld_data:/data"]
   worker:
     build: .

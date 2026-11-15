@@ -2,6 +2,8 @@
 se cargan desde archivos en data/inbox/<FUENTE>/ o por API/CLI. Cada URL admite alternativas separadas por coma."""
 from __future__ import annotations
 
+import contextlib
+
 import hashlib
 import time
 from pathlib import Path
@@ -37,24 +39,30 @@ def _save(settings: Settings, name: str, data: bytes) -> str:
     return sha
 
 
-def update_source(conn, settings: Settings, code: str, actor: str = "sistema") -> dict:
+def update_source(conn, settings: Settings, code: str, actor: str = "sistema", lock=None) -> dict:
+    """Descarga SIN el candado (puede tardar minutos) y solo toma `lock` para escribir en la base."""
+    lock = lock or contextlib.nullcontext()
     kw = dict(actor=actor, min_shrink_ratio=settings.min_shrink_ratio)
     if code == "OFAC_SDN":
         sdn = _get(settings.url_ofac_sdn)
         alt = _get(settings.url_ofac_alt)
         sha = _save(settings, "OFAC_SDN", sdn + b"\n--ALT--\n" + alt)
-        return import_records(conn, code, parsers.parse_ofac(sdn, alt), sha256=sha, filename="SDN+ALT", **kw)
+        with lock:
+            return import_records(conn, code, parsers.parse_ofac(sdn, alt), sha256=sha, filename="SDN+ALT", **kw)
     if code == "ONU_CSNU":
         data = _get(settings.url_un)
-        return import_records(conn, code, parsers.parse_un(data), sha256=_save(settings, code, data),
+        with lock:
+            return import_records(conn, code, parsers.parse_un(data), sha256=_save(settings, code, data),
                               filename="consolidated.xml", **kw)
     if code == "SAT_69B":
         data = _get(settings.url_sat_69b)
-        return import_records(conn, code, parsers.parse_sat69b(data, "69-B"), sha256=_save(settings, code, data),
+        with lock:
+            return import_records(conn, code, parsers.parse_sat69b(data, "69-B"), sha256=_save(settings, code, data),
                               filename="Listado_completo_69-B.csv", **kw)
     if code == "SAT_69B_BIS":
         data = _get(settings.url_sat_69b_bis)
-        return import_records(conn, code, parsers.parse_sat69b(data, "69-B Bis"), sha256=_save(settings, code, data),
+        with lock:
+            return import_records(conn, code, parsers.parse_sat69b(data, "69-B Bis"), sha256=_save(settings, code, data),
                               filename="Listado_69_B_Bis_Completo.csv", **kw)
     raise ValueError(f"{code} no tiene descarga automática; cárguela desde archivo (inbox/API/CLI)")
 

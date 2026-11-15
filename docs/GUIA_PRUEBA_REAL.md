@@ -94,6 +94,13 @@ Las condiciones gratuitas cambian: léalas al registrarse. Verifique en su contr
    - Resultado general `TODO CORRECTO ✔`.
 4. Si algo sale ✘: copie las líneas del paso y envíemelas. Lo más probable es una dirección oficial que cambió (se corrige con `PLD_URL_…` en `.env`) o un detalle del formato de un proveedor.
 
+## 5 bis. Actualización automática de listas
+
+- **OFAC, ONU, SAT 69-B y 69-B Bis se actualizan solas** cada 6 horas (`PLD_UPDATE_EVERY_H`) mientras la página esté encendida (`serve`). Se ve en la terminal: «actualización automática de listas…». En un servidor con Docker las actualiza el servicio `worker`, también sin intervención.
+- En la pestaña **Listas**, la columna *Cómo se actualiza* dice si cada fuente es automática, por API o de carga manual. Solo las automáticas pueden salir **DESACTUALIZADA** (más de 48 h sin actualizarse). Las manuales muestran **SIN CARGAR** hasta que usted deposite el archivo, y **REVISAR** si pasan 30 días.
+- **Manuales:** LPB, PEP, SAT 49 Bis e INTERNA. Basta dejar el archivo en `data/inbox/<FUENTE>/`; el sistema lo detecta en la siguiente ronda automática (o al ejecutar `process-inbox`).
+- En un Codespace la actualización se detiene cuando este se suspende; por eso la operación real debe ir en un servidor.
+
 ## 6. Pruebas manuales (30 min)
 
 1. Cree su usuario: `python -m pldscreen create-user director admin` (pide una contraseña de 10+ caracteres). Luego `python -m pldscreen serve --port 8000` → abrir el puerto 8000 → entre con `director` y su contraseña. (La clave de `data/clave_admin.txt` ya no se pega en la página; sirve solo para integraciones.)
