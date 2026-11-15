@@ -109,6 +109,8 @@ class Service(ClientesMixin, AdminMixin):
             if cur.rowcount == 0:
                 raise ServiceError("Usuario no encontrado", 404)
             self.conn.execute("DELETE FROM sessions WHERE name=?", (name,))
+            self.conn.execute("UPDATE password_requests SET estado='ATENDIDA', atendido_por=?, atendido_en=? "
+                              "WHERE usuario=? AND estado='PENDIENTE'", (actor, dbm.now(), name))
             dbm.audit(self.conn, actor, "CONTRASENA_CAMBIADA", {"usuario": name, "debe_cambiarla": forzar_cambio})
 
     def set_user_active(self, name: str, active: bool, actor: str) -> None:

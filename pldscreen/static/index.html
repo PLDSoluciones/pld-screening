@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>PLD Soluciones · Consultas de listas negras</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Crect width=%2732%27 height=%2732%27 rx=%277%27 fill=%27%230b5cad%27/%3E%3Ctext x=%2716%27 y=%2721%27 font-family=%27Arial%27 font-weight=%27bold%27 font-size=%2713%27 text-anchor=%27middle%27 fill=%27white%27%3EPLD%3C/text%3E%3C/svg%3E">
 <style>
 :root{--bg:#f6f7f9;--card:#fff;--tx:#1b1f24;--mut:#5b6572;--bd:#d9dee5;--ac:#0b5cab;--rojo:#b42318;--nar:#b54708;--ama:#8a6d00;--ver:#067647}
 @media (prefers-color-scheme:dark){:root{--bg:#14181d;--card:#1c2229;--tx:#e8ecf1;--mut:#9aa6b4;--bd:#2d3640;--ac:#5aa7ff;--rojo:#ff8a80;--nar:#ffb86b;--ama:#f2d15b;--ver:#5bd69b}}
@@ -46,10 +47,24 @@ a{color:var(--ac)}.warn{border:1px solid var(--nar);color:var(--nar);border-radi
 #toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);background:#1c2733;color:#fff;padding:10px 16px;border-radius:8px;font-size:14px;max-width:90vw;box-shadow:0 4px 18px #0004;z-index:99;opacity:0;pointer-events:none;transition:opacity .2s}#toast.on{opacity:1}
 dialog{border:1px solid var(--bd);border-radius:12px;padding:18px;max-width:420px;width:92vw;background:var(--card);color:var(--tx)}dialog::backdrop{background:#0006}dialog input{width:100%;margin-bottom:10px;padding:9px}
 .help h3{margin:18px 0 6px}.help td,.help th{vertical-align:top}.kpi-ok{color:var(--ver);font-weight:600}.kpi-mal{color:var(--rojo);font-weight:600}
+a.forgot{display:block;text-align:center;margin:14px 0 0;font-weight:600}label.mostrar{display:flex!important;justify-content:flex-start;gap:8px;align-items:center;font-size:13px;color:var(--mut);margin:0 0 12px;cursor:pointer}label.mostrar input{width:auto!important;margin:0!important;flex:none}
+.warn{font-size:12px;color:var(--nar);margin:-6px 0 8px}.solic{border-left:4px solid var(--nar);background:#fffaeb;color:#7a4a05}@media(prefers-color-scheme:dark){.solic{background:#3a2e0f;color:#f2d15b}}
+.sep{border:0;border-top:1px solid var(--bd);margin:14px 0}
 footer{max-width:1100px;margin:0 auto;padding:6px 16px 24px;color:var(--mut);font-size:12px}
 </style>
 </head>
 <body>
+<div id="toast" role="status" aria-live="polite"></div>
+<dialog id="drec"><h3 style="margin-top:0">Recuperar acceso</h3>
+  <b>Soy usuario</b>
+  <p class="mut">Escriba su usuario y avisaremos a su administrador para que le entregue una contraseña temporal.</p>
+  <label>Usuario</label><input id="rcu" autocapitalize="none" autocomplete="username">
+  <button id="rcs" style="width:100%">Solicitar restablecimiento</button>
+  <p id="rcm" class="mut"></p>
+  <hr class="sep">
+  <b>Soy administrador</b>
+  <div id="rcadm"></div>
+  <p style="margin-top:14px"><button class="sec" id="rcx">Cerrar</button></p></dialog>
 <div id="login" class="hide">
   <div class="card">
     <div class="brand"><div class="logo">PLD</div><div><b>PLD Soluciones</b><small>Consultas de listas negras</small></div></div>
@@ -57,8 +72,11 @@ footer{max-width:1100px;margin:0 auto;padding:6px 16px 24px;color:var(--mut);fon
     <p class="mut">Ingrese con el usuario y contraseña que le asignó su administrador.</p>
     <label for="lu">Usuario</label><input id="lu" autocomplete="username" autocapitalize="none">
     <label for="lp">Contraseña</label><input id="lp" type="password" autocomplete="current-password">
+    <div class="warn hide" id="caps">⚠ Tiene activadas las mayúsculas (Bloq Mayús)</div>
+    <label class="mostrar"><input type="checkbox" data-ojo="lp"> Mostrar contraseña</label>
     <button id="lgo">Entrar</button>
     <div class="err" id="lerr"></div>
+    <a href="#" class="forgot" id="olvido">¿Olvidó su contraseña?</a>
     <p class="mut" id="regp" style="margin:14px 0 0;text-align:center"><a href="#" id="regLink">¿No tiene cuenta? Solicite una demo gratuita</a></p>
   </div>
 </div>
@@ -73,6 +91,7 @@ footer{max-width:1100px;margin:0 auto;padding:6px 16px 24px;color:var(--mut);fon
     <label>Correo electrónico (será su usuario)</label><input id="re" type="email" autocomplete="email">
     <label>Teléfono (opcional)</label><input id="rtel" type="tel">
     <label>Contraseña (mín. 10 caracteres)</label><input id="rp" type="password" autocomplete="new-password">
+    <label class="mostrar"><input type="checkbox" data-ojo="rp"> Mostrar contraseña</label>
     <input id="rweb" tabindex="-1" autocomplete="off" style="position:absolute;left:-9999px" aria-hidden="true">
     <label class="chk"><input type="checkbox" id="rac"><span>Entiendo que es una demo limitada: sin guardado de expedientes ni alertas, constancias con marca de agua y sin validez para operaciones reales. No debo capturar datos de clientes reales.</span></label>
     <p style="margin-top:12px"><button id="rgo" style="width:100%;padding:11px;font-size:15px">Crear mi demo</button></p>
@@ -81,8 +100,8 @@ footer{max-width:1100px;margin:0 auto;padding:6px 16px 24px;color:var(--mut);fon
   </div>
 </div>
 <div id="app" class="hide">
-<div id="toast" role="status" aria-live="polite"></div>
-<dialog id="dcta"><h3 style="margin-top:0">Mi cuenta</h3><p class="mut" id="dctau"></p><label>Contraseña actual</label><input id="cpa" type="password" autocomplete="current-password"><label>Nueva contraseña (mín. 10 caracteres)</label><input id="cpn" type="password" autocomplete="new-password"><label>Repita la nueva contraseña</label><input id="cpr" type="password" autocomplete="new-password"><div class="err" id="cperr"></div><p><button id="cpok">Cambiar contraseña</button> <button class="sec" id="cpx">Cerrar</button></p></dialog>
+<dialog id="dcta"><h3 style="margin-top:0">Mi cuenta</h3><p class="mut" id="dctau"></p><label>Contraseña actual</label><input id="cpa" type="password" autocomplete="current-password"><label>Nueva contraseña (mín. 10 caracteres)</label><input id="cpn" type="password" autocomplete="new-password"><label>Repita la nueva contraseña</label><input id="cpr" type="password" autocomplete="new-password">
+<label class="mostrar"><input type="checkbox" data-ojo="cpa,cpn,cpr"> Mostrar contraseñas</label><div class="err" id="cperr"></div><p><button id="cpok">Cambiar contraseña</button> <button class="sec" id="cpx">Cerrar</button></p></dialog>
 <div id="demobar" class="demobar hide"></div>
 <header>
   <div class="brand"><div class="logo">PLD</div><div><b>PLD Soluciones</b><small>Consultas de listas negras</small></div></div>
@@ -192,6 +211,7 @@ footer{max-width:1100px;margin:0 auto;padding:6px 16px 24px;color:var(--mut);fon
   <div class="card" id="cll"></div>
 </section>
 <section id="usuarios" class="hide">
+  <div id="sol"></div>
   <div class="card"><h3 style="margin-top:0">Nuevo usuario</h3>
     <div class="grid">
       <div><label>Usuario (sin espacios)</label><input id="nu" style="width:100%" autocapitalize="none"></div>
@@ -202,7 +222,7 @@ footer{max-width:1100px;margin:0 auto;padding:6px 16px 24px;color:var(--mut);fon
   <div class="card" id="ul"></div>
 </section>
 </main>
-<footer>Herramienta de apoyo a la consulta de listas. El resultado no sustituye el criterio del Oficial de Cumplimiento ni el dictamen de su asesor legal.</footer>
+<footer><span id="ver"></span>Herramienta de apoyo a la consulta de listas. El resultado no sustituye el criterio del Oficial de Cumplimiento ni el dictamen de su asesor legal.</footer>
 </div>
 <div id="modal" class="hide" role="dialog" aria-modal="true" aria-labelledby="mtitle"><div class="mbox">
   <div class="mhead"><b id="mtitle"></b><span><button class="sec" id="mprint">Imprimir</button> <button class="sec" id="mclose">Cerrar</button></span></div>
@@ -222,7 +242,7 @@ function demoBar(){const c=ME&&ME.cuenta,b=$('demobar');if(!c||c.plan!='DEMO'){b
  b.innerHTML=t+(c.contacto?` · Contacto: <b>${esc(c.contacto)}</b>`:'');b.classList.remove('hide')}
 function showApp(){$('login').classList.add('hide');$('registro').classList.add('hide');$('app').classList.remove('hide');$('quien').textContent=`${ME.usuario} · ${ME.rol}`;
  const demo=!!(ME.cuenta&&ME.cuenta.plan=='DEMO');
- document.querySelectorAll('nav [data-t]').forEach(b=>{const t=b.dataset.t;b.classList.toggle('hide',!!((b.dataset.min&&RANK[ME.rol]<+b.dataset.min)||(demo&&!['consulta','listas','ayuda'].includes(t))))});demoBar();openTab('consulta');if(ME.debe)forzarCambio()}
+ document.querySelectorAll('nav [data-t]').forEach(b=>{const t=b.dataset.t;b.classList.toggle('hide',!!((b.dataset.min&&RANK[ME.rol]<+b.dataset.min)||(demo&&!['consulta','listas','ayuda'].includes(t))))});demoBar();openTab('consulta');if(ME.debe)forzarCambio();if(RANK[ME.rol]>=3)loadSol()}
 async function api(p,o={}){const r=await fetch(p,{...o,headers:{'X-API-Key':TOK(),'Content-Type':'application/json'}});
  const j=await r.json().catch(()=>({}));if(r.status==401&&p!='/v1/login'){showLogin('Su sesión terminó. Ingrese de nuevo.')}
  if(r.status==402&&ME&&ME.cuenta&&p!='/v1/me'){api('/v1/me').then(m=>{ME.cuenta=m.cuenta;demoBar()}).catch(()=>{})}
@@ -393,7 +413,9 @@ $('clb').onclick=loadCl;$('cle').onchange=loadCl;
 $('clcsv').onclick=async()=>{const h=await fetch('/v1/clientes/export.csv',{headers:{'X-API-Key':TOK()}});const a=document.createElement('a');a.href=URL.createObjectURL(await h.blob());a.download='clientes.csv';a.click()};
 $('clnew').onclick=async()=>{const o=prompt('Organización:');if(!o)return;const n=prompt('Nombre del contacto:');if(!n)return;const e=prompt('Correo (será su usuario):');if(!e)return;const p=prompt('Contraseña inicial (mín. 10 caracteres):');if(!p)return;
  const pg=confirm('¿Ya es cliente de pago?\nAceptar = PAGADO · Cancelar = DEMO');try{await api('/v1/clientes',{method:'POST',body:JSON.stringify({nombre:n,organizacion:o,email:e,contrasena:p,plan:pg?'PAGADO':'DEMO'})});loadCl()}catch(x){alert(x.message)}};
-async function loadUs(){try{const u=await api('/v1/users');$('ul').innerHTML=`<table><tr><th>Usuario</th><th>Rol</th><th>Estado</th><th>Último acceso</th><th></th></tr>${u.map(x=>`<tr><td><b>${esc(x.usuario)}</b></td><td><select onchange="cambiaRol('${esc(x.usuario)}',this.value)" ${x.usuario==ME.usuario?'disabled':''}>${['analista','supervisor','admin'].map(r=>`<option ${r==x.rol?'selected':''}>${r}</option>`).join('')}</select></td><td>${x.activo?'<span class="ok">Activo</span>':'<span class="mut">Desactivado</span>'}${x.puede_entrar_web?'':'<div class="mut">solo integración</div>'}</td><td>${x.ultimo_acceso?esc(fdt(x.ultimo_acceso)):'<span class="mut">nunca</span>'}</td><td><button class="sec" onclick="cambiarPw('${esc(x.usuario)}')">Cambiar contraseña</button> ${x.usuario==ME.usuario?'':`<button class="sec" onclick="restablece('${esc(x.usuario)}')">Restablecer</button>`}${x.debe_cambiar_contrasena?' <span class="b MEDIA">cambio pendiente</span>':''} <button class="sec" onclick="alterna('${esc(x.usuario)}',${x.activo})">${x.activo?'Desactivar':'Activar'}</button></td></tr>`).join('')}</table>`}catch(e){$('ul').textContent=e.message}}
+async function loadSol(){try{const l=await api('/v1/recuperar/solicitudes');const n=document.querySelector('nav [data-t=usuarios]');n.textContent='Usuarios'+(l.length?` (${l.length})`:'');
+ $('sol').innerHTML=l.length?`<div class="card solic"><b>🔔 ${l.length} solicitud${l.length>1?'es':''} de restablecimiento de contraseña</b>${l.map(x=>`<div style="margin-top:8px"><b>${esc(x.usuario)}</b> <span class="mut">· ${esc(fdt(x.creado))}</span> <button onclick="restablece('${esc(x.usuario)}')">Restablecer ahora</button></div>`).join('')}<div class="mut" style="margin-top:6px">Verifique la identidad de la persona antes de entregar la contraseña temporal.</div></div>`:''}catch(e){}}
+async function loadUs(){loadSol();try{const u=await api('/v1/users');$('ul').innerHTML=`<table><tr><th>Usuario</th><th>Rol</th><th>Estado</th><th>Último acceso</th><th></th></tr>${u.map(x=>`<tr><td><b>${esc(x.usuario)}</b></td><td><select onchange="cambiaRol('${esc(x.usuario)}',this.value)" ${x.usuario==ME.usuario?'disabled':''}>${['analista','supervisor','admin'].map(r=>`<option ${r==x.rol?'selected':''}>${r}</option>`).join('')}</select></td><td>${x.activo?'<span class="ok">Activo</span>':'<span class="mut">Desactivado</span>'}${x.puede_entrar_web?'':'<div class="mut">solo integración</div>'}</td><td>${x.ultimo_acceso?esc(fdt(x.ultimo_acceso)):'<span class="mut">nunca</span>'}</td><td><button class="sec" onclick="cambiarPw('${esc(x.usuario)}')">Cambiar contraseña</button> ${x.usuario==ME.usuario?'':`<button class="sec" onclick="restablece('${esc(x.usuario)}')">Restablecer</button>`}${x.debe_cambiar_contrasena?' <span class="b MEDIA">cambio pendiente</span>':''} <button class="sec" onclick="alterna('${esc(x.usuario)}',${x.activo})">${x.activo?'Desactivar':'Activar'}</button></td></tr>`).join('')}</table>`}catch(e){$('ul').textContent=e.message}}
 $('nuc').onclick=async()=>{$('nmsg').textContent='';try{await api('/v1/users',{method:'POST',body:JSON.stringify({usuario:$('nu').value.trim(),rol:$('nr').value,contrasena:$('np').value})});$('nu').value='';$('np').value='';$('nmsg').textContent='Usuario creado.';loadUs()}catch(e){$('nmsg').textContent=e.message}};
 async function cambiaRol(n,r){try{await api(`/v1/users/${encodeURIComponent(n)}/rol`,{method:'POST',body:JSON.stringify({rol:r})});toast(`Rol de ${n}: ${r}. Aplica al volver a entrar.`)}catch(e){toast(e.message,1)}loadUs()}
 async function restablece(n){if(!confirm(`Se generará una contraseña temporal para ${n} y se cerrarán sus sesiones. ¿Continuar?`))return;
@@ -422,6 +444,16 @@ $('rgo').onclick=async()=>{$('rerr').textContent='';$('rgo').disabled=true;try{
  if(r){try{sessionStorage.setItem('tok',r.token)}catch(e){};const m=await api('/v1/me');ME={usuario:m.usuario,rol:m.rol,cuenta:m.cuenta,debe:m.debe_cambiar_contrasena};showApp()}
  else{$('registro').classList.add('hide');$('login').classList.remove('hide');$('lerr').textContent='Demo creada. Ingrese con el usuario que se le asignó (su correo antes de la @) y su contraseña.'}
  }catch(e){$('rerr').textContent=e.message}$('rgo').disabled=false};
+document.addEventListener('change',e=>{const c=e.target;if(c.dataset&&c.dataset.ojo)c.dataset.ojo.split(',').forEach(i=>$(i).type=c.checked?'text':'password')});
+$('lp').addEventListener('keyup',e=>$('caps').classList.toggle('hide',!(e.getModifierState&&e.getModifierState('CapsLock'))));
+$('rcx').onclick=()=>$('drec').close();
+$('olvido').onclick=async e=>{e.preventDefault();$('rcu').value=$('lu').value;$('rcm').textContent='';let c={};try{c=await fetch('/v1/registro/config').then(r=>r.json())}catch(x){}
+ $('rcadm').innerHTML=c.recuperacion_admin?`<p class="mut">Use el código de recuperación que se definió en el servidor (<code>PLD_RECOVERY_CODE</code>).</p><label>Usuario administrador</label><input id="rau" autocapitalize="none"><label>Código de recuperación</label><input id="rac2" type="password" autocomplete="off"><label>Nueva contraseña (mín. 10)</label><input id="ran" type="password" autocomplete="new-password"><button id="rag" style="width:100%">Recuperar acceso de administrador</button><p id="ram" class="err"></p>`
+ :`<p class="mut">Pida a <b>otro administrador</b> que la restablezca desde <i>Usuarios → Restablecer</i>. Si es el único, en la terminal del servidor ejecute:<br><code>python -m pldscreen set-password SU_USUARIO</code><br>Para activar la recuperación desde esta pantalla, defina <code>PLD_RECOVERY_CODE</code> (16 caracteres o más) en el archivo .env y reinicie.</p>`;
+ const g=$('rag');if(g)g.onclick=async()=>{$('ram').textContent='';try{await api('/v1/recuperar/admin',{method:'POST',body:JSON.stringify({usuario:$('rau').value,codigo:$('rac2').value,nueva:$('ran').value})});$('drec').close();$('lu').value=$('rau').value;$('lp').value='';$('lerr').textContent='';toast('Contraseña actualizada. Ya puede iniciar sesión.')}catch(x){$('ram').textContent=x.message}};
+ $('drec').showModal()};
+$('rcs').onclick=async()=>{try{const r=await api('/v1/recuperar/solicitar',{method:'POST',body:JSON.stringify({usuario:$('rcu').value})});$('rcm').textContent=r.mensaje}catch(x){$('rcm').textContent=x.message}};
+$('ver').textContent='v2.2 · ';
 </script>
 </body>
 </html>

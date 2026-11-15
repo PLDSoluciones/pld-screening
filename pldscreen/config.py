@@ -68,6 +68,8 @@ class Settings:
     ext_api_key: str = field(default_factory=lambda: _env("PLD_EXT_API_KEY", ""))
     ext_base_url: str = field(default_factory=lambda: _env("PLD_EXT_BASE_URL", ""))
     ext_timeout: float = field(default_factory=lambda: float(_env("PLD_EXT_TIMEOUT", "20")))
+    # Código secreto (≥16 caracteres) que permite al ADMIN recuperar su acceso desde la pantalla de inicio. Vacío = desactivado.
+    recovery_code: str = field(default_factory=lambda: _env("PLD_RECOVERY_CODE", ""))
     # Demo para prospectos (registro público)
     registro_abierto: bool = field(default_factory=lambda: _env("PLD_REGISTRO_ABIERTO", "1") == "1")
     demo_dias: float = field(default_factory=lambda: float(_env("PLD_DEMO_DIAS", "2")))

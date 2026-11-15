@@ -30,6 +30,35 @@ class AdminMixin:
         self.set_password(name, temporal, actor, forzar_cambio=True)
         return temporal
 
+    # ---- recuperación desde la pantalla de inicio de sesión
+    def solicitar_restablecimiento(self, usuario: str) -> None:
+        """Registra una solicitud para que el administrador restablezca la contraseña. No revela si el usuario existe."""
+        usuario = (usuario or "").strip()[:60]
+        with self.lock, dbm.tx(self.conn):
+            ok = self.conn.execute("SELECT 1 FROM users WHERE name=? AND active=1", (usuario,)).fetchone()
+            ya = self.conn.execute("SELECT 1 FROM password_requests WHERE usuario=? AND estado='PENDIENTE'", (usuario,)).fetchone()
+            if ok and not ya:
+                self.conn.execute("INSERT INTO password_requests(usuario,creado) VALUES(?,?)", (usuario, dbm.now()))
+                dbm.audit(self.conn, "anonimo", "RESTABLECIMIENTO_SOLICITADO", {"usuario": usuario})
+
+    def solicitudes_restablecimiento(self) -> list[dict]:
+        with self.lock:
+            return [dict(r) for r in self.conn.execute(
+                "SELECT id,usuario,creado FROM password_requests WHERE estado='PENDIENTE' ORDER BY id")]
+
+    def recuperar_admin(self, usuario: str, codigo: str, nueva: str) -> bool:
+        """Cambia la contraseña de un ADMIN con el código secreto del servidor (PLD_RECOVERY_CODE). False = código/usuario incorrecto."""
+        from .service import ServiceError
+        cod = self.s.recovery_code or ""
+        if len(cod) < 16:
+            raise ServiceError("La recuperación por código no está configurada en este servidor", 403)
+        with self.lock:
+            r = self.conn.execute("SELECT 1 FROM users WHERE name=? AND role='admin' AND active=1", (usuario,)).fetchone()
+        if not secrets.compare_digest((codigo or "").encode(), cod.encode()) or not r:
+            return False
+        self.set_password(usuario, nueva, "recuperacion", forzar_cambio=False)
+        return True
+
     def set_role(self, name: str, role: str, actor: str) -> None:
         from .service import ROLES, ServiceError
         if role not in ROLES:

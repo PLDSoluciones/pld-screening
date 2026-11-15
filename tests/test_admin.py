@@ -105,3 +105,40 @@ def test_cli_o_integracion_no_forza_cambio(env):
     _, c = env
     h = tok(c, "ana", "ClaveAna2026!")  # creada sin forzar (CLI/fixture)
     assert c.get("/v1/me", headers=h).json()["debe_cambiar_contrasena"] is False
+
+
+def test_solicitud_de_restablecimiento(env):
+    svc, c = env
+    # no revela si el usuario existe
+    a = c.post("/v1/recuperar/solicitar", json={"usuario": "ana"})
+    b = c.post("/v1/recuperar/solicitar", json={"usuario": "no_existe"})
+    assert a.status_code == b.status_code == 200 and a.json() == b.json()
+    c.post("/v1/recuperar/solicitar", json={"usuario": "ana"})  # repetida: no duplica
+    ha = tok(c, "admin1", "AdminClave2026!")
+    sol = c.get("/v1/recuperar/solicitudes", headers=ha).json()
+    assert [x["usuario"] for x in sol] == ["ana"]
+    assert c.get("/v1/recuperar/solicitudes", headers=tok(c, "ana", "ClaveAna2026!")).status_code == 403
+    c.post("/v1/users/ana/restablecer", headers=ha)
+    assert c.get("/v1/recuperar/solicitudes", headers=ha).json() == []  # atendida
+
+
+def test_recuperar_admin_con_codigo(env):
+    svc, c = env
+    body = {"usuario": "admin1", "codigo": "x" * 20, "nueva": "NuevaAdmin2026!!"}
+    assert c.post("/v1/recuperar/admin", json=body).status_code == 403  # sin configurar
+    assert c.get("/v1/registro/config").json()["recuperacion_admin"] is False
+    svc.s.recovery_code = "codigo-secreto-del-servidor-123"
+    assert c.get("/v1/registro/config").json()["recuperacion_admin"] is True
+    assert c.post("/v1/recuperar/admin", json=body).status_code == 401  # código malo
+    assert c.post("/v1/recuperar/admin", json={**body, "codigo": svc.s.recovery_code, "usuario": "ana"}).status_code == 401  # no es admin
+    assert c.post("/v1/recuperar/admin", json={**body, "codigo": svc.s.recovery_code}).status_code == 200
+    assert c.post("/v1/login", json={"usuario": "admin1", "contrasena": "NuevaAdmin2026!!"}).status_code == 200
+
+
+def test_recuperar_admin_limita_intentos(env):
+    svc, c = env
+    svc.s.recovery_code = "codigo-secreto-del-servidor-123"
+    for _ in range(10):
+        c.post("/v1/recuperar/admin", json={"usuario": "admin1", "codigo": "mal", "nueva": "NuevaAdmin2026!!"})
+    assert c.post("/v1/recuperar/admin", json={"usuario": "admin1", "codigo": svc.s.recovery_code,
+                                                 "nueva": "NuevaAdmin2026!!"}).status_code == 429

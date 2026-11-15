@@ -87,6 +87,16 @@ class CambioContrasena(BaseModel):
     nueva: str = Field(..., min_length=10, max_length=200)
 
 
+class SolicitudReset(BaseModel):
+    usuario: str = Field(..., max_length=60)
+
+
+class RecuperarAdmin(BaseModel):
+    usuario: str = Field(..., max_length=60)
+    codigo: str = Field(..., max_length=200)
+    nueva: str = Field(..., min_length=10, max_length=200)
+
+
 class CambioRol(BaseModel):
     rol: str
 
@@ -252,7 +262,7 @@ def create_app(service: Service | None = None) -> FastAPI:
     # ---- registro de prospectos (público) y panel de clientes (admin)
     @app.get("/v1/registro/config", summary="Datos públicos del formulario de registro")
     def registro_cfg():
-        return {"abierto": svc.s.registro_abierto, "dias": svc.s.demo_dias, "consultas": svc.s.demo_consultas,
+        return {"abierto": svc.s.registro_abierto, "recuperacion_admin": len(svc.s.recovery_code or "") >= 16, "dias": svc.s.demo_dias, "consultas": svc.s.demo_consultas,
                 "contacto": svc.s.contacto_ventas}
 
     @app.post("/v1/registro", summary="Registro público: crea una cuenta de demo limitada")
@@ -272,6 +282,34 @@ def create_app(service: Service | None = None) -> FastAPI:
         r = run(svc.registrar_cliente, b.model_dump(), b.contrasena, "FORMULARIO", "registro")
         q.append(now)
         return r
+
+    @app.post("/v1/recuperar/solicitar", summary="El usuario pide al administrador que restablezca su contraseña")
+    def recuperar_solicitar(b: SolicitudReset, request: Request):
+        ip, now = _ip(request), time.time()
+        q = reg_hits["rec:" + ip]
+        while q and now - q[0] > 3600:
+            q.popleft()
+        if len(q) >= 5:
+            raise HTTPException(429, "Demasiadas solicitudes desde esta red; intente más tarde")
+        q.append(now)
+        svc.solicitar_restablecimiento(b.usuario)
+        return {"ok": True, "mensaje": "Si el usuario existe, el administrador recibió su solicitud. Pídale que la atienda."}
+
+    @app.post("/v1/recuperar/admin", summary="El administrador recupera su acceso con el código secreto del servidor")
+    def recuperar_admin(b: RecuperarAdmin, request: Request):
+        q = _limit(_ip(request))
+        try:
+            ok = svc.recuperar_admin(b.usuario.strip(), b.codigo, b.nueva)
+        except ServiceError as e:
+            raise HTTPException(e.status, str(e))
+        if not ok:
+            q.append(time.time())
+            raise HTTPException(401, "Código o usuario administrador incorrecto")
+        return {"ok": True}
+
+    @app.get("/v1/recuperar/solicitudes", summary="Solicitudes de restablecimiento pendientes (admin)")
+    def recuperar_solicitudes(u: dict = Depends(need("admin"))):
+        return svc.solicitudes_restablecimiento()
 
     @app.get("/v1/clientes", summary="Panel de clientes y demos (admin)")
     def clientes(estado: str | None = None, texto: str | None = None, u: dict = Depends(need("admin"))):

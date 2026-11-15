@@ -51,6 +51,8 @@ CREATE TABLE IF NOT EXISTS customers(
   id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT, organizacion TEXT, tipo TEXT, email TEXT, telefono TEXT,
   user_name TEXT UNIQUE, plan TEXT DEFAULT 'DEMO', demo_expira TEXT, consultas_max INTEGER, consultas_usadas INTEGER DEFAULT 0,
   origen TEXT, notas TEXT, creado TEXT, pagado_en TEXT, ultimo_acceso TEXT);
+CREATE TABLE IF NOT EXISTS password_requests(
+  id INTEGER PRIMARY KEY AUTOINCREMENT, usuario TEXT, creado TEXT, estado TEXT DEFAULT 'PENDIENTE', atendido_por TEXT, atendido_en TEXT);
 CREATE TABLE IF NOT EXISTS operation_parties(
   operation_id INTEGER, subject_id INTEGER, rol TEXT, PRIMARY KEY(operation_id, subject_id, rol));
 CREATE TABLE IF NOT EXISTS audit_log(

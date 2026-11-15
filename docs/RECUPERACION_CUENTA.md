@@ -17,3 +17,7 @@ Por eso: proteja el acceso al servidor y mantenga **al menos dos administradores
 **Clientes de demo.** Son usuarios como cualquier otro: el administrador usa *Restablecer* desde Usuarios (el usuario es la parte del correo antes de la @, visible en Clientes).
 
 **No existe** el enlace «Olvidé mi contraseña» por correo: el sistema no envía correos. Si más adelante lo necesita, se agrega con un servicio SMTP.
+
+## Desde la pantalla de inicio (v2.2)
+- **¿Olvidó su contraseña?** está visible bajo el botón Entrar. El usuario escribe su nombre y queda una **solicitud** que el administrador ve en *Usuarios* (aviso amarillo y número en la pestaña). El sistema responde igual exista o no el usuario, para no revelar quién tiene cuenta. El admin verifica la identidad y pulsa *Restablecer ahora*.
+- **Administrador sin otro admin:** defina `PLD_RECOVERY_CODE` (16 caracteres o más, guardado en lugar seguro) en `.env` y reinicie. Desde «¿Olvidó su contraseña?» → «Soy administrador» podrá fijar una contraseña nueva con ese código. Tiene límite de intentos. Sin el código configurado, la opción se desactiva.
