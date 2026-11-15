@@ -19,6 +19,9 @@ def main(argv=None) -> int:
     u = sub.add_parser("create-user", help="Crea un usuario/API key")
     u.add_argument("name")
     u.add_argument("role", choices=["analista", "supervisor", "admin"])
+    u.add_argument("--password", help="Contraseña (mín. 10 caracteres) para entrar por la página. Si se omite, se pide en pantalla")
+    sp = sub.add_parser("set-password", help="Asigna o cambia la contraseña de un usuario (se pide en pantalla)")
+    sp.add_argument("name")
     sub.add_parser("update-lists", help="Descarga OFAC, ONU y SAT 69-B")
     sub.add_parser("process-inbox", help="Importa archivos de data/inbox/<FUENTE>/")
     i = sub.add_parser("import", help="Importa un archivo a una lista")
@@ -58,7 +61,15 @@ def main(argv=None) -> int:
             else:
                 print("API key del administrador (guárdela, no se vuelve a mostrar):\n", svc.create_user("admin", "admin"))
         elif a.cmd == "create-user":
-            print("API key (guárdela, no se vuelve a mostrar):\n", svc.create_user(a.name, a.role))
+            import getpass
+            pw = a.password or getpass.getpass("Contraseña para entrar por la página (mín. 10 caracteres; Enter = solo API key): ") or None
+            print("API key (guárdela, no se vuelve a mostrar):\n", svc.create_user(a.name, a.role, pw))
+            if pw:
+                print(f"Usuario «{a.name}» ya puede entrar a la página con su contraseña.")
+        elif a.cmd == "set-password":
+            import getpass
+            svc.set_password(a.name, getpass.getpass("Nueva contraseña (mín. 10 caracteres): "), "cli")
+            print("Contraseña actualizada.")
         elif a.cmd == "update-lists":
             print(json.dumps(svc.update_lists(actor="cli"), indent=2, ensure_ascii=False))
         elif a.cmd == "process-inbox":
@@ -82,7 +93,7 @@ def main(argv=None) -> int:
             from . import fullcheck
             return 0 if fullcheck.run(svc) else 4
         elif a.cmd == "muestra":
-            for code in ("LPB_UIF", "SAT_69B", "SAT_69B_BIS", "OFAC_SDN", "ONU_CSNU", "PEP", "INTERNA"):
+            for code in ("LPB_UIF", "SAT_69B", "SAT_69B_BIS", "SAT_49BIS", "OFAC_SDN", "ONU_CSNU", "PEP", "INTERNA"):
                 rows = svc.conn.execute("SELECT primary_name,entity_type,rfc,curp,dobs,external_id FROM entries "
                                         "WHERE source_code=? AND active=1 ORDER BY RANDOM() LIMIT ?", (code, a.n)).fetchall()
                 if rows:
@@ -124,7 +135,7 @@ def demo(svc: Service) -> None:
     r = svc.import_list("OFAC_SDN", (SAMPLE / "sdn_demo.csv").read_bytes(), "ofac", "sdn_demo.csv", "demo", False,
                         (SAMPLE / "alt_demo.csv").read_bytes())
     print("OFAC_SDN", {k: r[k] for k in ("total", "added", "changed", "removed")})
-    print("Demo cargada. Pruebe: python -m pldscreen screen 'Juan Carlos Pérez López'")
+    print("Demo cargada. Pruebe: python -m pldscreen screen 'Ramon Quintero Salas'")
 
 
 if __name__ == "__main__":

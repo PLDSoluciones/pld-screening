@@ -64,22 +64,98 @@ class Service:
         self.provider = providers.build(self.s)
 
     # ------------------------------------------------------------------ usuarios
-    def create_user(self, name: str, role: str) -> str:
+    MIN_PASSWORD = 10
+    SESSION_HOURS = 8
+
+    @staticmethod
+    def _pw_hash(password: str, salt: str) -> str:
+        return hashlib.pbkdf2_hmac("sha256", password.encode(), bytes.fromhex(salt), 240_000).hex()
+
+    def _check_password(self, password: str) -> None:
+        if len(password or "") < self.MIN_PASSWORD:
+            raise ServiceError(f"La contraseña debe tener al menos {self.MIN_PASSWORD} caracteres")
+
+    def create_user(self, name: str, role: str, password: str | None = None) -> str:
+        """Crea usuario. Devuelve una API key (para integraciones). Con password también puede entrar por la página."""
         if role not in ROLES:
             raise ServiceError(f"Rol inválido. Use: {', '.join(ROLES)}")
+        name = (name or "").strip()
+        if not name or not name.replace("_", "").replace(".", "").replace("-", "").isalnum():
+            raise ServiceError("Usuario inválido: use letras, números, punto, guion o guion bajo")
+        salt = pw = None
+        if password:
+            self._check_password(password)
+            salt = secrets.token_hex(16)
+            pw = self._pw_hash(password, salt)
         key = "pld_" + secrets.token_urlsafe(32)
         with self.lock, dbm.tx(self.conn):
-            self.conn.execute("INSERT INTO users(name,role,key_hash,created_at) VALUES(?,?,?,?)",
-                              (name, role, hashlib.sha256(key.encode()).hexdigest(), dbm.now()))
-            dbm.audit(self.conn, "sistema", "USUARIO_CREADO", {"usuario": name, "rol": role})
+            if self.conn.execute("SELECT 1 FROM users WHERE name=?", (name,)).fetchone():
+                raise ServiceError("Ese usuario ya existe", 409)
+            self.conn.execute("INSERT INTO users(name,role,key_hash,created_at,pw_hash,pw_salt) VALUES(?,?,?,?,?,?)",
+                              (name, role, hashlib.sha256(key.encode()).hexdigest(), dbm.now(), pw, salt))
+            dbm.audit(self.conn, "sistema", "USUARIO_CREADO", {"usuario": name, "rol": role,
+                                                              "con_contrasena": bool(password)})
         return key
+
+    def set_password(self, name: str, password: str, actor: str = "sistema") -> None:
+        self._check_password(password)
+        salt = secrets.token_hex(16)
+        with self.lock, dbm.tx(self.conn):
+            cur = self.conn.execute("UPDATE users SET pw_hash=?, pw_salt=? WHERE name=? AND active=1",
+                                    (self._pw_hash(password, salt), salt, name))
+            if cur.rowcount == 0:
+                raise ServiceError("Usuario no encontrado", 404)
+            self.conn.execute("DELETE FROM sessions WHERE name=?", (name,))
+            dbm.audit(self.conn, actor, "CONTRASENA_CAMBIADA", {"usuario": name})
+
+    def set_user_active(self, name: str, active: bool, actor: str) -> None:
+        with self.lock, dbm.tx(self.conn):
+            cur = self.conn.execute("UPDATE users SET active=? WHERE name=?", (1 if active else 0, name))
+            if cur.rowcount == 0:
+                raise ServiceError("Usuario no encontrado", 404)
+            if not active:
+                self.conn.execute("DELETE FROM sessions WHERE name=?", (name,))
+            dbm.audit(self.conn, actor, "USUARIO_ACTIVADO" if active else "USUARIO_DESACTIVADO", {"usuario": name})
+
+    def list_users(self) -> list[dict]:
+        with self.lock:
+            return [{"usuario": r["name"], "rol": r["role"], "activo": bool(r["active"]),
+                     "puede_entrar_web": bool(r["pw_hash"]), "creado": r["created_at"]}
+                    for r in self.conn.execute("SELECT name,role,active,pw_hash,created_at FROM users ORDER BY name")]
+
+    def login(self, usuario: str, contrasena: str) -> dict | None:
+        with self.lock:
+            r = self.conn.execute("SELECT name,role,pw_hash,pw_salt FROM users WHERE name=? AND active=1",
+                                  ((usuario or "").strip(),)).fetchone()
+        # Se calcula siempre el hash (aun si el usuario no existe) para no revelar por tiempo qué usuarios existen
+        salt = r["pw_salt"] if r and r["pw_salt"] else "00" * 16
+        calc = self._pw_hash(contrasena or "", salt)
+        if not r or not r["pw_hash"] or not secrets.compare_digest(calc, r["pw_hash"]):
+            return None
+        token = "pldS_" + secrets.token_urlsafe(32)
+        exp = (_utc() + timedelta(hours=self.SESSION_HOURS)).isoformat(timespec="seconds")
+        with self.lock, dbm.tx(self.conn):
+            self.conn.execute("DELETE FROM sessions WHERE expires_at < ?", (dbm.now(),))
+            self.conn.execute("INSERT INTO sessions(token_hash,name,role,created_at,expires_at) VALUES(?,?,?,?,?)",
+                              (hashlib.sha256(token.encode()).hexdigest(), r["name"], r["role"], dbm.now(), exp))
+            dbm.audit(self.conn, r["name"], "INICIO_SESION", {})
+        return {"token": token, "usuario": r["name"], "rol": r["role"], "expira": exp}
+
+    def logout(self, token: str | None) -> None:
+        if token:
+            with self.lock, dbm.tx(self.conn):
+                self.conn.execute("DELETE FROM sessions WHERE token_hash=?", (hashlib.sha256(token.encode()).hexdigest(),))
 
     def authenticate(self, key: str | None) -> dict | None:
         if not key:
             return None
+        h = hashlib.sha256(key.encode()).hexdigest()
         with self.lock:
-            r = self.conn.execute("SELECT name,role FROM users WHERE key_hash=? AND active=1",
-                                  (hashlib.sha256(key.encode()).hexdigest(),)).fetchone()
+            r = self.conn.execute("SELECT name,role FROM users WHERE key_hash=? AND active=1", (h,)).fetchone()
+            if not r:
+                r = self.conn.execute(
+                    "SELECT s.name name, s.role role FROM sessions s JOIN users u ON u.name=s.name AND u.active=1 "
+                    "WHERE s.token_hash=? AND s.expires_at > ?", (h, dbm.now())).fetchone()
         return dict(r) if r else None
 
     def has_users(self) -> bool:

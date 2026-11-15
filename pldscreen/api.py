@@ -40,6 +40,21 @@ class Operacion(BaseModel):
                                                            "declara_pep, relacionados[] (beneficiarios controladores, representantes)")
 
 
+class Login(BaseModel):
+    usuario: str
+    contrasena: str
+
+
+class NuevoUsuario(BaseModel):
+    usuario: str
+    rol: str = Field(..., description="analista | supervisor | admin")
+    contrasena: str = Field(..., min_length=10)
+
+
+class NuevaContrasena(BaseModel):
+    contrasena: str = Field(..., min_length=10)
+
+
 class Resolucion(BaseModel):
     resolucion: str = Field(..., description="FALSO_POSITIVO | CONFIRMADA | DEVOLVER (solo supervisor, para regresar una propuesta)")
     nota: str = Field(..., min_length=10)
@@ -52,13 +67,20 @@ def create_app(service: Service | None = None) -> FastAPI:
 
     fails: dict[str, deque] = defaultdict(deque)  # IP → instantes de intentos fallidos
 
-    def user(request: Request, x_api_key: str | None = Header(None)) -> dict:
-        ip = (request.headers.get("x-forwarded-for") or (request.client.host if request.client else "?")).split(",")[0].strip()
+    def _ip(request: Request) -> str:
+        return (request.headers.get("x-forwarded-for") or (request.client.host if request.client else "?")).split(",")[0].strip()
+
+    def _limit(ip: str) -> deque:
         q, now = fails[ip], time.time()
         while q and now - q[0] > 300:
             q.popleft()
         if len(q) >= 10:
             raise HTTPException(429, "Demasiados intentos fallidos; espere 5 minutos")
+        return q
+
+    def user(request: Request, x_api_key: str | None = Header(None)) -> dict:
+        ip = _ip(request)
+        q, now = _limit(ip), time.time()
         u = svc.authenticate(x_api_key)
         if not u:
             q.append(now)
@@ -85,6 +107,49 @@ def create_app(service: Service | None = None) -> FastAPI:
     @app.get("/", include_in_schema=False)
     def home():
         return FileResponse(STATIC / "index.html")
+
+    # ---- acceso por la página (usuario + contraseña)
+    @app.post("/v1/login", summary="Inicia sesión (usuario y contraseña) y devuelve un token de 8 horas")
+    def login(b: Login, request: Request):
+        ip = _ip(request)
+        q = _limit(ip)
+        r = svc.login(b.usuario, b.contrasena)
+        if not r:
+            q.append(time.time())
+            raise HTTPException(401, "Usuario o contraseña incorrectos")
+        return r
+
+    @app.post("/v1/logout", summary="Cierra la sesión")
+    def logout(x_api_key: str | None = Header(None), u: dict = Depends(user)):
+        svc.logout(x_api_key)
+        return {"ok": True}
+
+    @app.get("/v1/me", summary="Usuario de la sesión actual")
+    def me(u: dict = Depends(user)):
+        return {"usuario": u["name"], "rol": u["role"]}
+
+    @app.get("/v1/users", summary="Lista de usuarios (admin)")
+    def users(u: dict = Depends(need("admin"))):
+        return svc.list_users()
+
+    @app.post("/v1/users", summary="Crea un usuario con contraseña (admin)")
+    def users_create(b: NuevoUsuario, u: dict = Depends(need("admin"))):
+        run(svc.create_user, b.usuario, b.rol, b.contrasena)
+        return {"ok": True, "usuario": b.usuario}
+
+    @app.post("/v1/users/{name}/password", summary="Cambia la contraseña de un usuario (admin)")
+    def users_pw(name: str, b: NuevaContrasena, u: dict = Depends(need("admin"))):
+        run(svc.set_password, name, b.contrasena, u["name"])
+        return {"ok": True}
+
+    @app.post("/v1/users/{name}/{accion}", summary="Activa o desactiva un usuario (admin)")
+    def users_toggle(name: str, accion: str, u: dict = Depends(need("admin"))):
+        if accion not in ("activar", "desactivar"):
+            raise HTTPException(404, "Acción no válida")
+        if name == u["name"] and accion == "desactivar":
+            raise HTTPException(400, "No puede desactivarse a sí mismo")
+        run(svc.set_user_active, name, accion == "activar", u["name"])
+        return {"ok": True}
 
     # ---- consultas
     @app.post("/v1/screen", summary="Consulta una persona (y sus relacionados) contra todas las listas")

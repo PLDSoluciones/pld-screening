@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>PLD Screening</title>
+<title>PLD Soluciones · Consultas de listas negras</title>
 <style>
 :root{--bg:#f6f7f9;--card:#fff;--tx:#1b1f24;--mut:#5b6572;--bd:#d9dee5;--ac:#0b5cab;--rojo:#b42318;--nar:#b54708;--ama:#8a6d00;--ver:#067647}
 @media (prefers-color-scheme:dark){:root{--bg:#14181d;--card:#1c2229;--tx:#e8ecf1;--mut:#9aa6b4;--bd:#2d3640;--ac:#5aa7ff;--rojo:#ff8a80;--nar:#ffb86b;--ama:#f2d15b;--ver:#5bd69b}}
@@ -19,34 +19,61 @@ button{cursor:pointer;background:var(--ac);color:#fff;border-color:var(--ac)}but
 table{width:100%;border-collapse:collapse}th,td{padding:6px 8px;border-bottom:1px solid var(--bd);text-align:left;vertical-align:top}th{font-size:12px;color:var(--mut)}
 .b{display:inline-block;padding:1px 8px;border-radius:10px;font-size:12px;font-weight:600;border:1px solid currentColor}
 .EXACTA,.ALTA,.CRITICA{color:var(--rojo)}.MEDIA{color:var(--nar)}.BAJA{color:var(--ama)}.ok{color:var(--ver)}
-.res{font-size:16px;font-weight:700}.mut{color:var(--mut)}.hide{display:none}
+.res{font-size:16px;font-weight:700}.mut{color:var(--mut)}.hide{display:none!important}
 @media(max-width:600px){th:nth-child(n+5),td:nth-child(n+5){display:none}}
+.brand{display:flex;align-items:center;gap:10px}.logo{width:34px;height:34px;border-radius:9px;background:var(--ac);color:#fff;display:grid;place-items:center;font-weight:800;font-size:15px}
+.brand b{display:block;font-size:16px;line-height:1.1}.brand small{color:var(--mut);font-size:12px}
+nav button.on{background:var(--ac);color:#fff;border-color:var(--ac)}
+#login{min-height:100vh;display:grid;place-items:center;padding:16px}#login .card{width:100%;max-width:380px;padding:26px}
+#login h2{margin:14px 0 4px;font-size:20px}#login input{width:100%;margin-bottom:12px;padding:10px}#login button{width:100%;padding:11px;font-size:15px}
+.err{color:var(--rojo);min-height:20px;margin:8px 0 0}.big{font-size:22px;padding:12px 14px}
+.banner{border-radius:8px;padding:14px 16px;border:1px solid currentColor;font-weight:700;font-size:18px;margin-bottom:12px}
+.who{display:flex;align-items:center;gap:8px;color:var(--mut)}details summary{cursor:pointer;color:var(--ac);margin:6px 0}
+footer{max-width:1100px;margin:0 auto;padding:6px 16px 24px;color:var(--mut);font-size:12px}
 </style>
 </head>
 <body>
+<div id="login" class="hide">
+  <div class="card">
+    <div class="brand"><div class="logo">PLD</div><div><b>PLD Soluciones</b><small>Consultas de listas negras</small></div></div>
+    <h2>Iniciar sesión</h2>
+    <p class="mut">Ingrese con el usuario y contraseña que le asignó su administrador.</p>
+    <label for="lu">Usuario</label><input id="lu" autocomplete="username" autocapitalize="none">
+    <label for="lp">Contraseña</label><input id="lp" type="password" autocomplete="current-password">
+    <button id="lgo">Entrar</button>
+    <div class="err" id="lerr"></div>
+  </div>
+</div>
+<div id="app" class="hide">
 <header>
-  <h1>PLD Screening · Consulta de listas</h1>
-  <nav>
-    <button class="sec" data-t="consulta">Consulta rápida</button>
+  <div class="brand"><div class="logo">PLD</div><div><b>PLD Soluciones</b><small>Consultas de listas negras</small></div></div>
+  <nav style="flex:1">
+    <button class="sec" data-t="consulta">Consulta</button>
     <button class="sec" data-t="expediente">Expediente</button>
     <button class="sec" data-t="alertas">Alertas</button>
     <button class="sec" data-t="listas">Listas</button>
-    <button class="sec" data-t="auditoria">Auditoría</button>
+    <button class="sec" data-t="auditoria" data-min="2">Auditoría</button>
+    <button class="sec" data-t="usuarios" data-min="3">Usuarios</button>
   </nav>
-  <input id="key" type="password" placeholder="API key" size="18">
+  <div class="who"><span id="quien"></span><button class="sec" id="salir">Salir</button></div>
 </header>
 <main>
 <section id="consulta">
   <div class="card">
-    <div class="grid">
-      <div><label>Referencia (ID de cliente; si se llena, se guarda y monitorea)</label><input id="ref" style="width:100%"></div>
-      <div><label>Nombre completo / razón social</label><input id="nombre" style="width:100%"></div>
-      <div><label>Tipo</label><select id="tipo" style="width:100%"><option value="">(auto)</option><option value="F">Persona física</option><option value="M">Persona moral</option></select></div>
-      <div><label>RFC</label><input id="rfc" style="width:100%"></div>
-      <div><label>CURP</label><input id="curp" style="width:100%"></div>
-      <div><label>Fecha de nacimiento</label><input id="dob" placeholder="AAAA-MM-DD" style="width:100%"></div>
+    <label>Nombre completo o razón social</label>
+    <input id="nombre" class="big" style="width:100%" placeholder="Ej.: Juan Pérez López  ·  Constructora Ejemplo, S.A. de C.V.">
+    <div class="grid" style="margin-top:10px">
+      <div><label>RFC (opcional)</label><input id="rfc" style="width:100%"></div>
+      <div><label>CURP (opcional)</label><input id="curp" style="width:100%"></div>
+      <div><label>Fecha de nacimiento (opcional)</label><input id="dob" placeholder="AAAA-MM-DD" style="width:100%"></div>
     </div>
-    <p><button id="go">Consultar</button> <span id="msg" class="mut"></span></p>
+    <details><summary>Más opciones</summary>
+      <div class="grid">
+        <div><label>Tipo de persona</label><select id="tipo" style="width:100%"><option value="">(detectar automáticamente)</option><option value="F">Persona física</option><option value="M">Persona moral</option></select></div>
+        <div><label>Referencia / ID de cliente (si se llena, se guarda y se monitorea)</label><input id="ref" style="width:100%"></div>
+      </div>
+    </details>
+    <p><button id="go" style="padding:10px 22px;font-size:15px">Consultar</button> <button class="sec" id="clr">Limpiar</button> <span id="msg" class="mut"></span></p>
   </div>
   <div id="out"></div>
 </section>
@@ -65,26 +92,50 @@ table{width:100%;border-collapse:collapse}th,td{padding:6px 8px;border-bottom:1p
 <section id="alertas" class="hide"><div class="card"><p><select id="st"><option value="">Todas</option><option>ABIERTA</option><option>PENDIENTE_APROBACION</option><option>CONFIRMADA</option><option>FALSO_POSITIVO</option></select> <button id="ra" class="sec">Actualizar</button></p><div id="al"></div></div></section>
 <section id="listas" class="hide"><div class="card" id="li"></div></section>
 <section id="auditoria" class="hide"><div class="card" id="au"></div></section>
+<section id="usuarios" class="hide">
+  <div class="card"><h3 style="margin-top:0">Nuevo usuario</h3>
+    <div class="grid">
+      <div><label>Usuario (sin espacios)</label><input id="nu" style="width:100%" autocapitalize="none"></div>
+      <div><label>Rol</label><select id="nr" style="width:100%"><option value="analista">Analista (consulta y propone)</option><option value="supervisor">Supervisor (aprueba)</option><option value="admin">Administrador</option></select></div>
+      <div><label>Contraseña (mín. 10 caracteres)</label><input id="np" type="password" style="width:100%" autocomplete="new-password"></div>
+    </div>
+    <p><button id="nuc">Crear usuario</button> <span id="nmsg" class="mut"></span></p></div>
+  <div class="card" id="ul"></div>
+</section>
 </main>
+<footer>Herramienta de apoyo a la consulta de listas. El resultado no sustituye el criterio del Oficial de Cumplimiento ni el dictamen de su asesor legal.</footer>
+</div>
 <script>
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-try{$('key').value=sessionStorage.getItem('k')||''}catch(e){}
-$('key').onchange=()=>{try{sessionStorage.setItem('k',$('key').value)}catch(e){}};
-async function api(p,o={}){const r=await fetch(p,{...o,headers:{'X-API-Key':$('key').value,'Content-Type':'application/json'}});
- const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.detail||r.statusText);return j}
-document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{document.querySelectorAll('main>section').forEach(s=>s.classList.add('hide'));$(b.dataset.t).classList.remove('hide');({alertas:loadAl,listas:loadLi,auditoria:loadAu})[b.dataset.t]?.()});
+const TOK=()=>{try{return sessionStorage.getItem('tok')||''}catch(e){return ''}};
+const RANK={analista:1,supervisor:2,admin:3};let ME=null;
+function showLogin(msg){ME=null;try{sessionStorage.removeItem('tok')}catch(e){};$('app').classList.add('hide');$('login').classList.remove('hide');$('lerr').textContent=msg||'';$('lp').value='';$('lu').focus()}
+function showApp(){$('login').classList.add('hide');$('app').classList.remove('hide');$('quien').textContent=`${ME.usuario} · ${ME.rol}`;
+ document.querySelectorAll('nav button[data-min]').forEach(b=>b.classList.toggle('hide',RANK[ME.rol]<+b.dataset.min));openTab('consulta')}
+async function api(p,o={}){const r=await fetch(p,{...o,headers:{'X-API-Key':TOK(),'Content-Type':'application/json'}});
+ const j=await r.json().catch(()=>({}));if(r.status==401&&p!='/v1/login'){showLogin('Su sesión terminó. Ingrese de nuevo.')}
+ if(!r.ok)throw new Error(typeof j.detail=='string'?j.detail:(r.statusText||'Error'));return j}
+async function doLogin(){$('lerr').textContent='';$('lgo').disabled=true;try{
+ const r=await api('/v1/login',{method:'POST',body:JSON.stringify({usuario:$('lu').value,contrasena:$('lp').value})});
+ try{sessionStorage.setItem('tok',r.token)}catch(e){};ME=r;showApp()}catch(e){$('lerr').textContent=e.message}$('lgo').disabled=false}
+$('lgo').onclick=doLogin;$('lp').onkeydown=e=>{if(e.key=='Enter')doLogin()};$('lu').onkeydown=e=>{if(e.key=='Enter')$('lp').focus()};
+$('salir').onclick=async()=>{try{await api('/v1/logout',{method:'POST'})}catch(e){}showLogin('')};
+(async()=>{if(!TOK())return showLogin();try{const m=await api('/v1/me');ME={usuario:m.usuario,rol:m.rol};showApp()}catch(e){showLogin()}})();
+function openTab(t){document.querySelectorAll('main>section').forEach(x=>x.classList.add('hide'));$(t).classList.remove('hide');
+ document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('on',b.dataset.t==t));({alertas:loadAl,listas:loadLi,auditoria:loadAu,usuarios:loadUs})[t]?.()}
+document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>openTab(b.dataset.t));
 const badge=l=>l?`<span class="b ${esc(l)}">${esc(l)}</span>`:'';
 function matches(ms){return ms.length?`<table><tr><th>Lista</th><th>Nombre en lista</th><th>Puntaje</th><th>Nivel</th><th>Razones</th></tr>${ms.map(m=>`<tr><td>${esc(m.fuente)}</td><td>${esc(m.nombre_coincidente)}<div class="mut">${esc(m.registro?.rfc||'')} ${esc(m.registro?.remarks||'')}</div></td><td>${m.puntaje}</td><td>${badge(m.nivel)}</td><td>${m.razones.map(esc).join('<br>')}</td></tr>`).join('')}</table>`:'<p class="ok">Sin coincidencias.</p>'}
 $('go').onclick=async()=>{$('msg').textContent='Consultando…';try{
  const body={referencia:$('ref').value||undefined,nombre:$('nombre').value||undefined,tipo:$('tipo').value||undefined,rfc:$('rfc').value||undefined,curp:$('curp').value||undefined,fecha_nacimiento:$('dob').value||undefined};
  const r=await api('/v1/screen',{method:'POST',body:JSON.stringify(body)});$('msg').textContent='';
- $('out').innerHTML=`<div class="card"><div class="res">${esc(r.resultado)} ${badge(r.nivel_maximo)}</div><p>Riesgo sugerido: <b>${esc(r.riesgo_sugerido)}</b> · Folio ${r.id_consulta} · <a href="#" id="cons">Constancia imprimible</a></p>
+ const sin=!r.coincidencias.length;$('out').innerHTML=`<div class="card"><div class="banner ${sin?'ok':(['EXACTA','ALTA'].includes(r.nivel_maximo)?'EXACTA':'MEDIA')}">${sin?'✔ Sin coincidencias en las listas consultadas':'⚠ '+esc(String(r.resultado).replaceAll('_',' '))+' '+badge(r.nivel_maximo)}</div><p>Riesgo sugerido: <b>${esc(r.riesgo_sugerido)}</b> · Folio ${r.id_consulta} · <a href="#" id="cons">Constancia imprimible</a></p>
  ${r.acciones_recomendadas.map(a=>`<p>• ${esc(a)}</p>`).join('')}${matches(r.coincidencias)}
  ${r.descartadas_previamente.length?`<p class="mut">${r.descartadas_previamente.length} coincidencia(s) descartada(s) previamente como falso positivo.</p>`:''}
  ${r.alertas_generadas.length?`<p><b>Alertas generadas:</b> ${r.alertas_generadas.join(', ')}</p>`:''}
  <p class="mut">Huella de evidencia: ${esc(r.evidencia_sha256)}</p></div>`;
- $('cons').onclick=async e=>{e.preventDefault();const h=await fetch(`/v1/screenings/${r.id_consulta}/constancia`,{headers:{'X-API-Key':$('key').value}}).then(x=>x.text());const w=window.open('');w.document.write(h);w.document.close()}
+ $('cons').onclick=async e=>{e.preventDefault();const h=await fetch(`/v1/screenings/${r.id_consulta}/constancia`,{headers:{'X-API-Key':TOK()}}).then(x=>x.text());const w=window.open('');w.document.write(h);w.document.close()}
 }catch(e){$('msg').textContent='';$('out').innerHTML=`<div class="card" style="color:var(--rojo)">${esc(e.message)}</div>`}};
 const ROLES=['ENAJENANTE','ADQUIRENTE','VENDEDOR','COMPRADOR','DONANTE','DONATARIO','FIDEICOMITENTE','FIDEICOMISARIO','FIDUCIARIO','APODERADO','REPRESENTANTE','BENEFICIARIO_CONTROLADOR','SOCIO','ACCIONISTA','ARRENDADOR','ARRENDATARIO','PROMITENTE_VENDEDOR','PROMITENTE_COMPRADOR','OTORGANTE','OTRO'];
 function rowHtml(rel){return `<div class="card ${rel?'rel':'par'}" style="margin:6px 0 6px ${rel?'28px':'0'}"><div class="grid">
@@ -109,8 +160,14 @@ $('goe').onclick=async()=>{$('msge').textContent='Consultando…';try{
  ${r.hallazgos.length?`<h4>Hallazgos</h4><ul>${r.hallazgos.map(h=>`<li><b>${esc(h.parte)}</b> (${esc(h.rol)}) ${badge(h.nivel)} – ${esc(h.listas.join(', '))}${h.alertas.length?' · alertas '+h.alertas.join(', '):''}<br><span class="mut">${esc((h.acciones||[]).join(' | '))}</span></li>`).join('')}</ul>`:'<p class="ok">Sin coincidencias relevantes.</p>'}
  ${r.advertencias.length?`<h4>Advertencias para el expediente</h4><ul>${r.advertencias.map(a=>`<li>${esc(a)}</li>`).join('')}</ul>`:''}
  <p class="mut">Huella: ${esc(r.evidencia_sha256)}</p></div>`;
- $('cons2').onclick=async ev=>{ev.preventDefault();const h=await fetch(`/v1/operaciones/${r.id_operacion}/constancia`,{headers:{'X-API-Key':$('key').value}}).then(x=>x.text());const w=window.open('');w.document.write(h);w.document.close()}
+ $('cons2').onclick=async ev=>{ev.preventDefault();const h=await fetch(`/v1/operaciones/${r.id_operacion}/constancia`,{headers:{'X-API-Key':TOK()}}).then(x=>x.text());const w=window.open('');w.document.write(h);w.document.close()}
 }catch(e){$('msge').textContent='';$('oute').innerHTML=`<div class="card" style="color:var(--rojo)">${esc(e.message)}</div>`}};
+$('clr').onclick=()=>{['nombre','rfc','curp','dob','ref'].forEach(i=>$(i).value='');$('tipo').value='';$('out').innerHTML='';$('nombre').focus()};
+$('nombre').onkeydown=e=>{if(e.key=='Enter')$('go').click()};
+async function loadUs(){try{const u=await api('/v1/users');$('ul').innerHTML=`<table><tr><th>Usuario</th><th>Rol</th><th>Entra por la página</th><th>Estado</th><th></th></tr>${u.map(x=>`<tr><td><b>${esc(x.usuario)}</b></td><td>${esc(x.rol)}</td><td>${x.puede_entrar_web?'Sí':'No (solo integración)'}</td><td>${x.activo?'<span class="ok">Activo</span>':'<span class="mut">Desactivado</span>'}</td><td><button class="sec" onclick="cambiarPw('${esc(x.usuario)}')">Cambiar contraseña</button> <button class="sec" onclick="alterna('${esc(x.usuario)}',${x.activo})">${x.activo?'Desactivar':'Activar'}</button></td></tr>`).join('')}</table>`}catch(e){$('ul').textContent=e.message}}
+$('nuc').onclick=async()=>{$('nmsg').textContent='';try{await api('/v1/users',{method:'POST',body:JSON.stringify({usuario:$('nu').value.trim(),rol:$('nr').value,contrasena:$('np').value})});$('nu').value='';$('np').value='';$('nmsg').textContent='Usuario creado.';loadUs()}catch(e){$('nmsg').textContent=e.message}};
+async function cambiarPw(n){const p=prompt(`Nueva contraseña para ${n} (mín. 10 caracteres):`);if(!p)return;try{await api(`/v1/users/${encodeURIComponent(n)}/password`,{method:'POST',body:JSON.stringify({contrasena:p})});alert('Contraseña actualizada.')}catch(e){alert(e.message)}}
+async function alterna(n,act){try{await api(`/v1/users/${encodeURIComponent(n)}/${act?'desactivar':'activar'}`,{method:'POST'});loadUs()}catch(e){alert(e.message)}}
 async function loadAl(){try{const a=await api('/v1/alerts'+($('st').value?'?status='+$('st').value:''));
  $('al').innerHTML=a.length?`<table><tr><th>#</th><th>Sujeto</th><th>Lista</th><th>Nivel</th><th>Estado</th><th>Vence</th><th></th></tr>${a.map(x=>`<tr><td>${x.id}</td><td>${esc(x.subject_name||'')}<div class="mut">${esc(x.ref||'')}</div></td><td>${esc(x.source_code)}<div class="mut">${esc(x.matched_name)}</div></td><td>${badge(x.level)} ${x.score.toFixed(0)}</td><td>${esc(x.status)}${x.vencida?' <span class="b ALTA">VENCIDA</span>':''}</td><td>${esc(x.due_at.slice(0,16))}</td><td>${['ABIERTA','PENDIENTE_APROBACION'].includes(x.status)?`<button class="sec" onclick="res(${x.id},'FALSO_POSITIVO')">Falso +</button> <button class="sec" onclick="res(${x.id},'CONFIRMADA')">Confirmar</button>${x.status=='PENDIENTE_APROBACION'?` <button class="sec" onclick="res(${x.id},'DEVOLVER')">Devolver</button>`:''}`:''}</td></tr>`).join('')}</table>`:'<p class="mut">Sin alertas.</p>'}catch(e){$('al').textContent=e.message}}
 $('ra').onclick=loadAl;$('st').onchange=loadAl;

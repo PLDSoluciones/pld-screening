@@ -118,7 +118,7 @@ Servicio systemd (Linux) para ambos: cree `pld-api.service` y `pld-worker.servic
 1. **Probar con datos ficticios:** `python -m pldscreen demo` y abra `http://localhost:8000` → pegue su API key → consulte
    “Héctor Vargas Roldán” (OFAC ficticio), CURP `QUSR650505HSLNLM04` (LPB ficticio) o “Facturadora Andina” (SAT ficticio).
    *Los datos de `data/sample` son inventados.* Para empezar de cero, borre `data/pld.db` antes de cargar listas reales.
-2. **Crear usuarios:** `python -m pldscreen create-user sofia supervisor` (roles: `analista`, `supervisor`, `admin`).
+2. **Crear usuarios:** `python -m pldscreen create-user sofia supervisor` (roles: `analista`, `supervisor`, `admin`; pide contraseña para entrar por la página). El administrador también puede crearlos en la pestaña **Usuarios**.
    Recomendado: al menos 2 analistas y 2 supervisores (la doble validación exige personas distintas).
 3. **Cargar listas públicas:** `python -m pldscreen update-lists`.
 4. **Cargar LPB / PEP / internas:** copie el archivo a `data/inbox/LPB_UIF/` (o `PEP/`, `INTERNA/`) y ejecute

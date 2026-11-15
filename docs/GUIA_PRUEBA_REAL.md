@@ -57,6 +57,12 @@ Las fuentes **oficiales no usan API ni clave**: el sistema las descarga solo.
 | **Lista de Personas Bloqueadas (UIF)** | Canal oficial UIF/SAT/SHCP. **Pregunte por escrito** si su notaría/inmobiliaria tiene acceso y en qué formato. Ningún proveedor comercial debe vendérsela | No hay API |
 | **PEP oficial (UIF)** | Aplicación “Consulta PEP 2.0” con e.firma (según los resúmenes consultados, disponible a partir de ≈ agosto de 2027). No tiene API | No hay API |
 
+**Art. 49 Bis CFF (CFDI falsos, vigente desde 2026).** El SAT lo publica con oficios individuales en el DOF y en su portal; a la fecha **no hay archivo oficial consolidado** (el apartado de Datos Abiertos solo trae 69, 69-B y 69-B Bis). Por eso el sistema lo carga desde un archivo que **usted mantiene**:
+1. Copie `data/plantillas/SAT_49BIS.csv` a `data/inbox/SAT_49BIS/` (cualquier nombre `.csv`).
+2. Capture una fila por contribuyente publicado (columnas `rfc,nombre,tipo,estatus,observaciones`), tomando los datos **del oficio del DOF o del portal del SAT**. En *observaciones* anote el número de oficio y la fecha.
+3. Cada vez que haya un oficio nuevo, agregue la fila al **mismo archivo completo** (con un nombre que ordene después, p. ej. `49bis_2026-11-14.csv`) y ejecute `python -m pldscreen process-inbox`. El archivo más reciente reemplaza al anterior, por eso debe contener la lista completa.
+4. No use listas de terceros (blogs, Excel de despachos) como fuente única: son útiles para enterarse, pero la evidencia es el DOF.
+
 APIs comerciales para PEP/sanciones (para complementar, no para sustituir lo oficial):
 
 | Proveedor | Cómo obtener la clave | Para activarlo en este sistema |
@@ -90,11 +96,11 @@ Las condiciones gratuitas cambian: léalas al registrarse. Verifique en su contr
 
 ## 6. Pruebas manuales (30 min)
 
-1. `python -m pldscreen serve --port 8000` → abrir el puerto 8000 → pegar la clave de `cat data/clave_admin.txt`.
+1. Cree su usuario: `python -m pldscreen create-user director admin` (pide una contraseña de 10+ caracteres). Luego `python -m pldscreen serve --port 8000` → abrir el puerto 8000 → entre con `director` y su contraseña. (La clave de `data/clave_admin.txt` ya no se pega en la página; sirve solo para integraciones.)
 2. `python -m pldscreen muestra --n 5` → copie nombres reales del SAT y de OFAC → **Consulta rápida** (con nombre solo, y con RFC).
 3. Consulte un PEP mexicano **público y conocido** (p. ej., el titular de un gobierno estatal) → debe salir `EXT_PEP`. Si el proveedor no lo encuentra, **esa es su respuesta sobre cobertura en México**.
 4. Pestaña **Expediente**: dos partes y un beneficiario controlador → constancia imprimible.
-5. Cree usuarios: en la terminal `python -m pldscreen create-user analista1 analista` (y `supervisor1 supervisor`) y pruebe la doble validación.
+5. Cree usuarios en la pestaña **Usuarios** de la página (`analista1`, `analista2`, `supervisor1`, `supervisor2`) y pruebe la doble validación entrando con cada uno.
 
 ## 7. Qué NO hacer en esta etapa
 

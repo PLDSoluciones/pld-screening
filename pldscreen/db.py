@@ -66,6 +66,11 @@ SOURCES = [
     dict(code="SAT_69B_BIS", name="SAT Art. 69-B Bis CFF – Enajenación ilegal de bienes (EDOS)", category="SAT",
          authority="SAT", severity="ALTA", legal_basis="Art. 69-B Bis CFF. Listado público del SAT.",
          action="Escalar a Oficial de Cumplimiento; reforzar debida diligencia."),
+    dict(code="SAT_49BIS", name="SAT Art. 49 Bis CFF – CFDI falsos (publicación en DOF y portal SAT)", category="SAT",
+         authority="SAT", severity="ALTA",
+         legal_basis="Art. 49 Bis CFF (vigente desde 1-ene-2026). Se publica por oficios individuales en el DOF y el portal del SAT; "
+                     "no hay archivo oficial consolidado: se carga desde un archivo mantenido por la organización (ver docs).",
+         action="Escalar a Oficial de Cumplimiento; reforzar debida diligencia; evaluar aviso por sospecha."),
     dict(code="OFAC_SDN", name="OFAC – Specially Designated Nationals (EE.UU.)", category="SANCIONES",
          authority="OFAC/US Treasury", severity="ALTA",
          legal_basis="Referencia internacional; aplicación basada en riesgo (no es por sí misma obligación mexicana).",
@@ -104,6 +109,12 @@ def connect(path: str) -> sqlite3.Connection:
 
 def init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(users)")}
+    for c in ("pw_hash", "pw_salt"):
+        if c not in cols:
+            conn.execute(f"ALTER TABLE users ADD COLUMN {c} TEXT")
+    conn.execute("CREATE TABLE IF NOT EXISTS sessions(token_hash TEXT PRIMARY KEY, name TEXT, role TEXT, "
+                 "created_at TEXT, expires_at TEXT)")
     for s in SOURCES:
         conn.execute(
             "INSERT OR IGNORE INTO sources(code,name,category,authority,severity,legal_basis,action) VALUES(?,?,?,?,?,?,?)",

@@ -117,11 +117,16 @@ Necesita: un servidor Linux (VPS) **Ubuntu 24.04, 2 vCPU y 2–4 GB de RAM, 40 G
    docker compose -f docker-compose.prod.yml exec api python -m pldscreen update-lists
    docker compose -f docker-compose.prod.yml exec api python -m pldscreen selftest
    ```
-7. Abra `https://pld.sunotaria.mx` → candado verde, pegue la clave, revise **Listas**.
-8. **Usuarios** (uno por persona; roles `analista`, `supervisor`, `admin`):
+7. Cree su **usuario administrador para la página** (el comando le pide la contraseña, mínimo 10 caracteres):
+   ```
+   docker compose -f docker-compose.prod.yml exec api python -m pldscreen create-user director admin
+   ```
+   Abra `https://pld.sunotaria.mx` → candado verde → entre con ese usuario y contraseña → revise **Listas**.
+8. **Usuarios** (uno por persona; roles `analista`, `supervisor`, `admin`). Desde la página: pestaña **Usuarios** → *Nuevo usuario* (solo administradores). O por terminal:
    ```
    docker compose -f docker-compose.prod.yml exec api python -m pldscreen create-user sofia supervisor
    ```
+   Cada persona entra con su usuario y contraseña; las sesiones duran 8 horas y se bloquean 5 minutos tras 10 intentos fallidos. La clave `pld_…` que imprime el comando es solo para integraciones con otros sistemas.
    Cree **al menos 2 analistas y 2 supervisores**: la doble validación exige que quien aprueba sea otra persona.
 9. **Actualizar el sistema** cuando haya una versión nueva en GitHub:
    ```
