@@ -50,21 +50,22 @@ dialog{border:1px solid var(--bd);border-radius:12px;padding:18px;max-width:420p
 a.forgot{display:block;text-align:center;margin:14px 0 0;font-weight:600}label.mostrar{display:flex!important;justify-content:flex-start;gap:8px;align-items:center;font-size:13px;color:var(--mut);margin:0 0 12px;cursor:pointer}label.mostrar input{width:auto!important;margin:0!important;flex:none}
 .warn{font-size:12px;color:var(--nar);margin:-6px 0 8px}.solic{border-left:4px solid var(--nar);background:#fffaeb;color:#7a4a05}@media(prefers-color-scheme:dark){.solic{background:#3a2e0f;color:#f2d15b}}
 .sep{border:0;border-top:1px solid var(--bd);margin:14px 0}
+button.opt{display:block;width:100%;text-align:left;margin:0 0 10px;padding:12px 14px;background:var(--card);color:var(--tx);border:1px solid var(--bd)}button.opt:hover{border-color:var(--ac)}button.opt b{display:block;font-size:15px}button.opt span{font-size:13px;color:var(--mut)}
+.okm{color:var(--ver);font-weight:600}
 footer{max-width:1100px;margin:0 auto;padding:6px 16px 24px;color:var(--mut);font-size:12px}
 </style>
 </head>
 <body>
 <div id="toast" role="status" aria-live="polite"></div>
-<dialog id="drec"><h3 style="margin-top:0">Recuperar acceso</h3>
-  <b>Soy usuario</b>
-  <p class="mut">Escriba su usuario y avisaremos a su administrador para que le entregue una contraseña temporal.</p>
-  <label>Usuario</label><input id="rcu" autocapitalize="none" autocomplete="username">
-  <button id="rcs" style="width:100%">Solicitar restablecimiento</button>
-  <p id="rcm" class="mut"></p>
-  <hr class="sep">
-  <b>Soy administrador</b>
-  <div id="rcadm"></div>
-  <p style="margin-top:14px"><button class="sec" id="rcx">Cerrar</button></p></dialog>
+<dialog id="drec"><h3 style="margin-top:0">¿Olvidó su contraseña?</h3>
+  <div id="rc0"><p class="mut">Elija una opción:</p>
+    <button class="opt" id="rcU"><b>👤 Soy usuario</b><span>Pedir a mi administrador una contraseña nueva</span></button>
+    <button class="opt" id="rcA"><b>🛡️ Soy administrador</b><span>Recuperar mi propio acceso</span></button></div>
+  <div id="rc1" class="hide"><p class="mut">Escriba su usuario. Su administrador recibirá el aviso y le dará una <b>contraseña temporal</b>.</p>
+    <label>Su usuario</label><input id="rcu" autocapitalize="none" autocomplete="username">
+    <button id="rcs" style="width:100%">Enviar solicitud</button><p id="rcm" style="margin:10px 0 0"></p></div>
+  <div id="rc2" class="hide"></div>
+  <p style="margin:16px 0 0"><button class="sec hide" id="rcb">← Volver</button> <button class="sec" id="rcx">Cerrar</button></p></dialog>
 <div id="login" class="hide">
   <div class="card">
     <div class="brand"><div class="logo">PLD</div><div><b>PLD Soluciones</b><small>Consultas de listas negras</small></div></div>
@@ -447,12 +448,18 @@ $('rgo').onclick=async()=>{$('rerr').textContent='';$('rgo').disabled=true;try{
 document.addEventListener('change',e=>{const c=e.target;if(c.dataset&&c.dataset.ojo)c.dataset.ojo.split(',').forEach(i=>$(i).type=c.checked?'text':'password')});
 $('lp').addEventListener('keyup',e=>$('caps').classList.toggle('hide',!(e.getModifierState&&e.getModifierState('CapsLock'))));
 $('rcx').onclick=()=>$('drec').close();
-$('olvido').onclick=async e=>{e.preventDefault();$('rcu').value=$('lu').value;$('rcm').textContent='';let c={};try{c=await fetch('/v1/registro/config').then(r=>r.json())}catch(x){}
- $('rcadm').innerHTML=c.recuperacion_admin?`<p class="mut">Use el código de recuperación que se definió en el servidor (<code>PLD_RECOVERY_CODE</code>).</p><label>Usuario administrador</label><input id="rau" autocapitalize="none"><label>Código de recuperación</label><input id="rac2" type="password" autocomplete="off"><label>Nueva contraseña (mín. 10)</label><input id="ran" type="password" autocomplete="new-password"><button id="rag" style="width:100%">Recuperar acceso de administrador</button><p id="ram" class="err"></p>`
- :`<p class="mut">Pida a <b>otro administrador</b> que la restablezca desde <i>Usuarios → Restablecer</i>. Si es el único, en la terminal del servidor ejecute:<br><code>python -m pldscreen set-password SU_USUARIO</code><br>Para activar la recuperación desde esta pantalla, defina <code>PLD_RECOVERY_CODE</code> (16 caracteres o más) en el archivo .env y reinicie.</p>`;
+let RCFG={};
+function rcVer(id){['rc0','rc1','rc2'].forEach(x=>$(x).classList.toggle('hide',x!=id));$('rcb').classList.toggle('hide',id=='rc0')}
+$('olvido').onclick=async e=>{e.preventDefault();try{RCFG=await fetch('/v1/registro/config').then(r=>r.json())}catch(x){RCFG={}}
+ $('rcm').textContent='';rcVer('rc0');$('drec').showModal()};
+$('rcb').onclick=()=>rcVer('rc0');
+$('rcU').onclick=()=>{$('rcu').value=$('lu').value;$('rcm').textContent='';rcVer('rc1');$('rcu').focus()};
+$('rcA').onclick=()=>{
+ $('rc2').innerHTML=RCFG.recuperacion_admin?`<p class="mut">Escriba su usuario, el <b>código de recuperación</b> del servidor y su nueva contraseña.</p><label>Su usuario</label><input id="rau" autocapitalize="none" value="${esc($('lu').value)}"><label>Código de recuperación</label><input id="rac2" type="password" autocomplete="off"><label>Nueva contraseña (mín. 10 caracteres)</label><input id="ran" type="password" autocomplete="new-password"><button id="rag" style="width:100%">Cambiar mi contraseña</button><p id="ram" class="err"></p>`
+ :`<p class="mut">Tiene dos opciones:</p><ol style="padding-left:20px;margin:0 0 8px"><li style="margin-bottom:8px"><b>Otro administrador</b> entra a <i>Usuarios</i> y pulsa <i>Restablecer</i> en su nombre.</li><li><b>Terminal del servidor:</b><br><code>python -m pldscreen set-password SU_USUARIO</code></li></ol><p class="mut" style="font-size:12px">Para poder recuperarla desde esta pantalla, el responsable del servidor debe definir <code>PLD_RECOVERY_CODE</code> en el archivo .env.</p>`;
  const g=$('rag');if(g)g.onclick=async()=>{$('ram').textContent='';try{await api('/v1/recuperar/admin',{method:'POST',body:JSON.stringify({usuario:$('rau').value,codigo:$('rac2').value,nueva:$('ran').value})});$('drec').close();$('lu').value=$('rau').value;$('lp').value='';$('lerr').textContent='';toast('Contraseña actualizada. Ya puede iniciar sesión.')}catch(x){$('ram').textContent=x.message}};
- $('drec').showModal()};
-$('rcs').onclick=async()=>{try{const r=await api('/v1/recuperar/solicitar',{method:'POST',body:JSON.stringify({usuario:$('rcu').value})});$('rcm').textContent=r.mensaje}catch(x){$('rcm').textContent=x.message}};
+ rcVer('rc2')};
+$('rcs').onclick=async()=>{try{const r=await api('/v1/recuperar/solicitar',{method:'POST',body:JSON.stringify({usuario:$('rcu').value})});$('rcm').className='okm';$('rcm').textContent='✔ Solicitud enviada. Avise a su administrador para que le entregue su contraseña temporal.'}catch(x){$('rcm').className='err';$('rcm').textContent=x.message}};
 $('ver').textContent='v2.2 · ';
 </script>
 </body>
