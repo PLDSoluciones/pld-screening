@@ -20,6 +20,8 @@ from .matching import Index, Match, Query, level_rank
 from .normalize import normalize_curp, normalize_rfc
 from . import operations as ops
 from . import providers
+from .clientes import ClientesMixin
+from .admin import AdminMixin
 
 ROLES = {"analista": 1, "supervisor": 2, "admin": 3}
 
@@ -46,7 +48,7 @@ def _utc() -> datetime:
     return datetime.now(timezone.utc)
 
 
-class Service:
+class Service(ClientesMixin, AdminMixin):
     def __init__(self, settings: Settings | None = None):
         self.s = settings or get_settings()
         self.s.ensure_dirs()
@@ -119,8 +121,9 @@ class Service:
 
     def list_users(self) -> list[dict]:
         with self.lock:
+            acc = self.ultimos_accesos()
             return [{"usuario": r["name"], "rol": r["role"], "activo": bool(r["active"]),
-                     "puede_entrar_web": bool(r["pw_hash"]), "creado": r["created_at"]}
+                     "puede_entrar_web": bool(r["pw_hash"]), "creado": r["created_at"], "ultimo_acceso": acc.get(r["name"])}
                     for r in self.conn.execute("SELECT name,role,active,pw_hash,created_at FROM users ORDER BY name")]
 
     def login(self, usuario: str, contrasena: str) -> dict | None:
@@ -767,10 +770,10 @@ class Service:
                         "evidencia_sha256": r["evidence_hash"]})
         return out
 
-    def get_screening(self, sid: int) -> dict:
+    def get_screening(self, sid: int, solo_actor: str | None = None) -> dict:
         with self.lock:
-            r = self.conn.execute("SELECT result_json FROM screenings WHERE id=?", (sid,)).fetchone()
-        if not r:
+            r = self.conn.execute("SELECT result_json, actor FROM screenings WHERE id=?", (sid,)).fetchone()
+        if not r or (solo_actor and r["actor"] != solo_actor):
             raise ServiceError("Consulta no encontrada", 404)
         return json.loads(r["result_json"])
 
@@ -954,11 +957,11 @@ class Service:
         from . import constancia
         return constancia.render_operacion(self.get_operation(op_id), self.s)
 
-    def constancia_html(self, screening_id: int) -> str:
+    def constancia_html(self, screening_id: int, solo_actor: str | None = None, demo: bool = False) -> str:
         from . import constancia
         with self.lock:
             r = self.conn.execute("SELECT * FROM screenings WHERE id=?", (screening_id,)).fetchone()
-        if not r:
+        if not r or (solo_actor and r["actor"] != solo_actor):
             raise ServiceError("Consulta no encontrada", 404)
-        return constancia.render_consulta(screening_id, r, json.loads(r["result_json"]), self.s)
+        return constancia.render_consulta(screening_id, r, json.loads(r["result_json"]), self.s, demo=demo)
 

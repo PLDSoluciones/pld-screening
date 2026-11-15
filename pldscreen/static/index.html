@@ -40,6 +40,12 @@ nav button.on{background:var(--ac);color:#fff;border-color:var(--ac)}
 .bars i{display:block;background:var(--ac);border-radius:4px 4px 0 0;min-height:2px;margin-bottom:3px}.hbar{display:flex;align-items:center;gap:8px;margin:4px 0}.hbar i{display:block;height:12px;background:var(--ac);border-radius:3px}
 a{color:var(--ac)}.warn{border:1px solid var(--nar);color:var(--nar);border-radius:8px;padding:10px 12px;margin-bottom:14px}
 @media print{body>*:not(#modal){display:none!important}#modal{position:static;background:none;padding:0}.mhead button{display:none}.mbox{border:0}}
+#registro .card{max-width:460px}#registro input,#registro select{width:100%;margin-bottom:10px;padding:9px}#registro label.chk{display:flex;gap:8px;align-items:flex-start;color:var(--tx);font-size:13px}#registro label.chk input{width:auto;margin:3px 0 0}
+.demobar{background:#fffaeb;color:#7a4a05;border-bottom:1px solid #e9c46a;padding:8px 16px;font-size:13px}@media(prefers-color-scheme:dark){.demobar{background:#3a2e0f;color:#f2d15b;border-color:#6b5513}}
+.pill{display:inline-block;padding:1px 8px;border-radius:10px;font-size:12px;font-weight:600;border:1px solid currentColor}.p-PAGADO{color:var(--ver)}.p-DEMO_ACTIVO{color:var(--ac)}.p-DEMO_VENCIDO,.p-DEMO_AGOTADO{color:var(--nar)}.p-SUSPENDIDO{color:var(--rojo)}
+#toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);background:#1c2733;color:#fff;padding:10px 16px;border-radius:8px;font-size:14px;max-width:90vw;box-shadow:0 4px 18px #0004;z-index:99;opacity:0;pointer-events:none;transition:opacity .2s}#toast.on{opacity:1}
+dialog{border:1px solid var(--bd);border-radius:12px;padding:18px;max-width:420px;width:92vw;background:var(--card);color:var(--tx)}dialog::backdrop{background:#0006}dialog input{width:100%;margin-bottom:10px;padding:9px}
+.help h3{margin:18px 0 6px}.help td,.help th{vertical-align:top}.kpi-ok{color:var(--ver);font-weight:600}.kpi-mal{color:var(--rojo);font-weight:600}
 footer{max-width:1100px;margin:0 auto;padding:6px 16px 24px;color:var(--mut);font-size:12px}
 </style>
 </head>
@@ -53,9 +59,31 @@ footer{max-width:1100px;margin:0 auto;padding:6px 16px 24px;color:var(--mut);fon
     <label for="lp">Contraseña</label><input id="lp" type="password" autocomplete="current-password">
     <button id="lgo">Entrar</button>
     <div class="err" id="lerr"></div>
+    <p class="mut" id="regp" style="margin:14px 0 0;text-align:center"><a href="#" id="regLink">¿No tiene cuenta? Solicite una demo gratuita</a></p>
+  </div>
+</div>
+<div id="registro" class="hide" style="min-height:100vh;display:grid;place-items:center;padding:16px">
+  <div class="card" style="width:100%">
+    <div class="brand"><div class="logo">PLD</div><div><b>PLD Soluciones</b><small>Consultas de listas negras</small></div></div>
+    <h2 style="margin:14px 0 4px;font-size:20px">Solicite su demo</h2>
+    <p class="mut" id="regtxt">Prueba gratuita con funciones y consultas limitadas.</p>
+    <label>Su nombre</label><input id="rn" autocomplete="name">
+    <label>Notaría, inmobiliaria u organización</label><input id="ro">
+    <label>Tipo</label><select id="rt"><option value="NOTARIA">Notaría</option><option value="INMOBILIARIA">Inmobiliaria</option><option value="DESPACHO">Despacho</option><option value="OTRO">Otro</option></select>
+    <label>Correo electrónico (será su usuario)</label><input id="re" type="email" autocomplete="email">
+    <label>Teléfono (opcional)</label><input id="rtel" type="tel">
+    <label>Contraseña (mín. 10 caracteres)</label><input id="rp" type="password" autocomplete="new-password">
+    <input id="rweb" tabindex="-1" autocomplete="off" style="position:absolute;left:-9999px" aria-hidden="true">
+    <label class="chk"><input type="checkbox" id="rac"><span>Entiendo que es una demo limitada: sin guardado de expedientes ni alertas, constancias con marca de agua y sin validez para operaciones reales. No debo capturar datos de clientes reales.</span></label>
+    <p style="margin-top:12px"><button id="rgo" style="width:100%;padding:11px;font-size:15px">Crear mi demo</button></p>
+    <div class="err" id="rerr"></div>
+    <p style="text-align:center;margin:8px 0 0"><a href="#" id="regBack">Ya tengo cuenta · volver a iniciar sesión</a></p>
   </div>
 </div>
 <div id="app" class="hide">
+<div id="toast" role="status" aria-live="polite"></div>
+<dialog id="dcta"><h3 style="margin-top:0">Mi cuenta</h3><p class="mut" id="dctau"></p><label>Contraseña actual</label><input id="cpa" type="password" autocomplete="current-password"><label>Nueva contraseña (mín. 10 caracteres)</label><input id="cpn" type="password" autocomplete="new-password"><label>Repita la nueva contraseña</label><input id="cpr" type="password" autocomplete="new-password"><div class="err" id="cperr"></div><p><button id="cpok">Cambiar contraseña</button> <button class="sec" id="cpx">Cerrar</button></p></dialog>
+<div id="demobar" class="demobar hide"></div>
 <header>
   <div class="brand"><div class="logo">PLD</div><div><b>PLD Soluciones</b><small>Consultas de listas negras</small></div></div>
   <nav style="flex:1">
@@ -68,8 +96,11 @@ footer{max-width:1100px;margin:0 auto;padding:6px 16px 24px;color:var(--mut);fon
     <button class="sec" data-t="listas">Listas</button>
     <button class="sec" data-t="auditoria" data-min="2">Auditoría</button>
     <button class="sec" data-t="usuarios" data-min="3">Usuarios</button>
+    <button class="sec" data-t="clientes" data-min="3">Clientes</button>
+    <button class="sec" data-t="sistema" data-min="3">Sistema</button>
+    <button class="sec" data-t="ayuda">Ayuda</button>
   </nav>
-  <div class="who"><span id="quien"></span><button class="sec" id="salir">Salir</button></div>
+  <div class="who"><span id="quien"></span><button class="sec" id="mica">Mi cuenta</button><button class="sec" id="salir">Salir</button></div>
 </header>
 <main>
 <section id="consulta">
@@ -126,6 +157,40 @@ footer{max-width:1100px;margin:0 auto;padding:6px 16px 24px;color:var(--mut);fon
 <section id="alertas" class="hide"><div class="card"><p><select id="st"><option value="">Todas</option><option>ABIERTA</option><option>PENDIENTE_APROBACION</option><option>CONFIRMADA</option><option>FALSO_POSITIVO</option></select> <button id="ra" class="sec">Actualizar</button></p><div id="al"></div></div></section>
 <section id="listas" class="hide"><div class="card" id="li"></div></section>
 <section id="auditoria" class="hide"><div class="card" id="au"></div></section>
+<section id="sistema" class="hide">
+  <div id="sit" class="tiles"></div>
+  <div class="card" id="sid"></div>
+  <div class="card"><h3 style="margin-top:0">Mantenimiento</h3>
+    <p><button id="sbk">Descargar respaldo de la base</button> <button class="sec" id="sva">Verificar integridad de la bitácora</button> <button class="sec" id="sdp">Depurar consultas de demos vencidas (+30 días)</button></p>
+    <p class="mut" id="smsg"></p>
+    <p class="mut">El respaldo contiene información sensible (personas consultadas y usuarios): guárdelo cifrado y fuera del servidor. Haga uno antes de cada actualización del sistema.</p></div>
+</section>
+<section id="ayuda" class="hide"><div class="card help">
+  <h2 style="margin-top:0">Cómo usar el sistema</h2>
+  <h3>1. Consultar a una persona</h3>
+  <p>En <b>Consulta</b> escriba el nombre completo o la razón social. Si tiene RFC, CURP o fecha de nacimiento, agréguelos: reducen falsos positivos. Pulse <b>Consultar</b> y, al terminar, <b>Constancia imprimible</b> para guardar la evidencia.</p>
+  <h3>2. Cómo leer el resultado</h3>
+  <table><tr><th>Nivel</th><th>Significa</th><th>Qué hacer</th></tr>
+   <tr><td><b>EXACTA</b></td><td>Mismo RFC/CURP o nombre idéntico</td><td>Tratar como coincidencia real hasta descartarla; escalar al Oficial de Cumplimiento.</td></tr>
+   <tr><td><b>ALTA</b></td><td>Nombre muy parecido (≥ 93)</td><td>Comparar con la ficha (fecha de nacimiento, país, RFC) y documentar la decisión.</td></tr>
+   <tr><td><b>MEDIA</b></td><td>Parecido razonable (≥ 85)</td><td>Revisar; suele ser homónimo. Pida más datos al cliente.</td></tr>
+   <tr><td><b>BAJA</b></td><td>Parecido débil (≥ 78)</td><td>Revisión rápida; normalmente se descarta.</td></tr></table>
+  <p>Abra el nombre de la coincidencia para ver la <b>ficha</b>: compara dato por dato (✔ coincide, ≈ parecido, ✗ distinto) y enlaza la fuente oficial para verificar.</p>
+  <h3>3. Qué listas se consultan</h3>
+  <p>Se actualizan solas: <b>OFAC</b>, <b>ONU</b>, <b>SAT 69-B</b> y <b>69-B Bis</b>. Se cargan a mano: <b>LPB (UIF)</b>, <b>PEP</b>, <b>SAT 49 Bis</b> e <b>Interna</b>. En la pestaña <b>Listas</b> verá el estado de cada una. <b>Si LPB o PEP no están cargadas con datos reales, un resultado «sin coincidencias» NO descarta que la persona esté en ellas.</b></p>
+  <h3>4. Lotes, expedientes y alertas</h3>
+  <p><b>Lote</b>: pegue o suba un CSV con muchas personas. <b>Expediente</b>: consulta a todas las partes de un acto (comprador, vendedor, apoderado…) y emite un dictamen. <b>Alertas</b>: coincidencias por resolver; el analista propone y el supervisor aprueba. <b>Historial</b>: todas las consultas, con filtros y exportación.</p>
+  <h3>5. Buenas prácticas</h3>
+  <ul><li>Conserve la constancia en el expediente (el plazo de conservación lo define su asesor).</li><li>Cambie su contraseña desde <b>Mi cuenta</b> y no la comparta.</li><li>Esta herramienta apoya, pero no sustituye, el criterio del Oficial de Cumplimiento ni el dictamen de su asesor legal.</li></ul>
+</div></section>
+<section id="clientes" class="hide">
+  <div id="clt" class="tiles"></div>
+  <div class="card"><div class="grid">
+    <div><label>Estado</label><select id="cle" style="width:100%"><option value="">Todos</option><option value="DEMO_ACTIVO">Demo activa</option><option value="DEMO_VENCIDO">Demo vencida</option><option value="DEMO_AGOTADO">Consultas agotadas</option><option value="PAGADO">Pagado</option><option value="SUSPENDIDO">Suspendido</option></select></div>
+    <div><label>Buscar (nombre, organización, correo)</label><input id="clx" style="width:100%"></div></div>
+    <p><button id="clb">Buscar</button> <button class="sec" id="clcsv">Exportar a CSV</button> <button class="sec" id="clnew">Alta manual…</button> <span id="clm" class="mut"></span></p></div>
+  <div class="card" id="cll"></div>
+</section>
 <section id="usuarios" class="hide">
   <div class="card"><h3 style="margin-top:0">Nuevo usuario</h3>
     <div class="grid">
@@ -147,20 +212,30 @@ const $=id=>document.getElementById(id);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const TOK=()=>{try{return sessionStorage.getItem('tok')||''}catch(e){return ''}};
 const RANK={analista:1,supervisor:2,admin:3};let ME=null;
-function showLogin(msg){ME=null;try{sessionStorage.removeItem('tok')}catch(e){};$('app').classList.add('hide');$('login').classList.remove('hide');$('lerr').textContent=msg||'';$('lp').value='';$('lu').focus()}
-function showApp(){$('login').classList.add('hide');$('app').classList.remove('hide');$('quien').textContent=`${ME.usuario} · ${ME.rol}`;
- document.querySelectorAll('[data-min]').forEach(b=>b.classList.toggle('hide',RANK[ME.rol]<+b.dataset.min));openTab('consulta')}
+function showLogin(msg){ME=null;$('demobar').classList.add('hide');$('registro').classList.add('hide');try{sessionStorage.removeItem('tok')}catch(e){};$('app').classList.add('hide');$('login').classList.remove('hide');$('lerr').textContent=msg||'';$('lp').value='';$('lu').focus()}
+const fdt=iso=>{try{return new Date(iso).toLocaleString('es-MX',{dateStyle:'medium',timeStyle:'short'})}catch(e){return iso||''}};
+function demoBar(){const c=ME&&ME.cuenta,b=$('demobar');if(!c||c.plan!='DEMO'){b.classList.add('hide');return}
+ const rest=Math.max(0,(c.consultas_max||0)-(c.consultas_usadas||0));let t;
+ if(c.estado=='DEMO_VENCIDO')t='⛔ Su demo terminó. Para seguir usando el sistema adquiera la versión completa.';
+ else if(c.estado=='DEMO_AGOTADO')t='⛔ Agotó las consultas de su demo. Adquiera la versión completa para continuar.';
+ else t=`🧪 <b>Demo limitada</b> · vence ${esc(fdt(c.demo_expira))} · consultas restantes: <b>${rest}</b> de ${c.consultas_max}. Sin guardado de expedientes ni alertas; constancias sin validez. No capture datos de clientes reales.`;
+ b.innerHTML=t+(c.contacto?` · Contacto: <b>${esc(c.contacto)}</b>`:'');b.classList.remove('hide')}
+function showApp(){$('login').classList.add('hide');$('registro').classList.add('hide');$('app').classList.remove('hide');$('quien').textContent=`${ME.usuario} · ${ME.rol}`;
+ const demo=!!(ME.cuenta&&ME.cuenta.plan=='DEMO');
+ document.querySelectorAll('nav [data-t]').forEach(b=>{const t=b.dataset.t;b.classList.toggle('hide',!!((b.dataset.min&&RANK[ME.rol]<+b.dataset.min)||(demo&&!['consulta','listas','ayuda'].includes(t))))});demoBar();openTab('consulta')}
 async function api(p,o={}){const r=await fetch(p,{...o,headers:{'X-API-Key':TOK(),'Content-Type':'application/json'}});
  const j=await r.json().catch(()=>({}));if(r.status==401&&p!='/v1/login'){showLogin('Su sesión terminó. Ingrese de nuevo.')}
+ if(r.status==402&&ME&&ME.cuenta&&p!='/v1/me'){api('/v1/me').then(m=>{ME.cuenta=m.cuenta;demoBar()}).catch(()=>{})}
+ if(r.ok&&p=='/v1/screen'&&ME&&ME.cuenta&&ME.cuenta.plan=='DEMO'){ME.cuenta.consultas_usadas++;if(ME.cuenta.consultas_usadas>=ME.cuenta.consultas_max)ME.cuenta.estado='DEMO_AGOTADO';demoBar()}
  if(!r.ok)throw new Error(typeof j.detail=='string'?j.detail:(r.statusText||'Error'));return j}
 async function doLogin(){$('lerr').textContent='';$('lgo').disabled=true;try{
  const r=await api('/v1/login',{method:'POST',body:JSON.stringify({usuario:$('lu').value,contrasena:$('lp').value})});
- try{sessionStorage.setItem('tok',r.token)}catch(e){};ME=r;showApp()}catch(e){$('lerr').textContent=e.message}$('lgo').disabled=false}
+ try{sessionStorage.setItem('tok',r.token)}catch(e){};const m=await api('/v1/me');ME={usuario:m.usuario,rol:m.rol,cuenta:m.cuenta};showApp()}catch(e){$('lerr').textContent=e.message}$('lgo').disabled=false}
 $('lgo').onclick=doLogin;$('lp').onkeydown=e=>{if(e.key=='Enter')doLogin()};$('lu').onkeydown=e=>{if(e.key=='Enter')$('lp').focus()};
 $('salir').onclick=async()=>{try{await api('/v1/logout',{method:'POST'})}catch(e){}showLogin('')};
-(async()=>{if(!TOK())return showLogin();try{const m=await api('/v1/me');ME={usuario:m.usuario,rol:m.rol};showApp()}catch(e){showLogin()}})();
+(async()=>{if(!TOK())return showLogin();try{const m=await api('/v1/me');ME={usuario:m.usuario,rol:m.rol,cuenta:m.cuenta};showApp()}catch(e){showLogin()}})();
 function openTab(t){document.querySelectorAll('main>section').forEach(x=>x.classList.add('hide'));$(t).classList.remove('hide');
- document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('on',b.dataset.t==t));({inicio:loadIn,alertas:loadAl,historial:()=>loadHi(true),listas:loadLi,auditoria:loadAu,usuarios:loadUs})[t]?.()}
+ document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('on',b.dataset.t==t));({inicio:loadIn,alertas:loadAl,historial:()=>loadHi(true),listas:loadLi,auditoria:loadAu,usuarios:loadUs,clientes:loadCl,sistema:loadSis})[t]?.()}
 document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>openTab(b.dataset.t));
 const badge=l=>l?`<span class="b ${esc(l)}">${esc(l)}</span>`:'';
 const QREG=[];
@@ -284,8 +359,41 @@ $('goe').onclick=async()=>{$('msge').textContent='Consultando…';try{
 }catch(e){$('msge').textContent='';$('oute').innerHTML=`<div class="card" style="color:var(--rojo)">${esc(e.message)}</div>`}};
 $('clr').onclick=()=>{['nombre','rfc','curp','dob','ref'].forEach(i=>$(i).value='');$('tipo').value='';$('out').innerHTML='';$('nombre').focus()};
 $('nombre').onkeydown=e=>{if(e.key=='Enter')$('go').click()};
-async function loadUs(){try{const u=await api('/v1/users');$('ul').innerHTML=`<table><tr><th>Usuario</th><th>Rol</th><th>Estado</th><th></th><th>Entra por la página</th></tr>${u.map(x=>`<tr><td><b>${esc(x.usuario)}</b></td><td>${esc(x.rol)}</td><td>${x.activo?'<span class="ok">Activo</span>':'<span class="mut">Desactivado</span>'}</td><td><button class="sec" onclick="cambiarPw('${esc(x.usuario)}')">Cambiar contraseña</button> <button class="sec" onclick="alterna('${esc(x.usuario)}',${x.activo})">${x.activo?'Desactivar':'Activar'}</button></td><td>${x.puede_entrar_web?'Sí':'No (solo integración)'}</td></tr>`).join('')}</table>`}catch(e){$('ul').textContent=e.message}}
+let _tt;function toast(m,err){const t=$('toast');t.textContent=m;t.style.background=err?'#a32':'#1c2733';t.classList.add('on');clearTimeout(_tt);_tt=setTimeout(()=>t.classList.remove('on'),4200)}
+window.alert=m=>toast(String(m));
+$('mica').onclick=()=>{$('dctau').textContent=`${ME.usuario} · ${ME.rol}`;['cpa','cpn','cpr'].forEach(i=>$(i).value='');$('cperr').textContent='';$('dcta').showModal()};
+$('cpx').onclick=()=>$('dcta').close();
+$('cpok').onclick=async()=>{$('cperr').textContent='';try{if($('cpn').value!==$('cpr').value)throw new Error('Las contraseñas nuevas no coinciden.');if($('cpn').value.length<10)throw new Error('Use al menos 10 caracteres.');
+ await api('/v1/me/password',{method:'POST',body:JSON.stringify({actual:$('cpa').value,nueva:$('cpn').value})});$('dcta').close();toast('Contraseña actualizada. Se cerraron sus otras sesiones.')}catch(e){$('cperr').textContent=e.message}};
+async function loadSis(){try{const s=await api('/v1/sistema'),t=s.totales,fh=h=>h?esc(fdt(h)):'—';
+ $('sit').innerHTML=[['Consultas (24 h)',t.consultas_24h],['Consultas totales',t.consultas],['Alertas abiertas',t.alertas_abiertas],['Personas monitoreadas',t.personas_monitoreadas],['Registros en listas',t.registros_en_listas.toLocaleString('es-MX')],['Usuarios activos',t.usuarios_activos],['Clientes',t.clientes]].map(x=>`<div class="tile"><b>${x[1]}</b><span>${x[0]}</span></div>`).join('');
+ $('sid').innerHTML=`<table><tr><td>Versión</td><td><b>${esc(s.version)}</b></td></tr><tr><td>Hora del servidor (UTC)</td><td>${fh(s.hora_servidor_utc)}</td></tr><tr><td>Última carga de listas</td><td>${fh(s.ultima_carga_listas)}</td></tr>
+ <tr><td>Actualización automática</td><td class="${s.actualizacion_automatica?'kpi-ok':'kpi-mal'}">${s.actualizacion_automatica?'Activa':'Desactivada'}</td></tr>
+ <tr><td>Proveedor externo (PEP/sanciones)</td><td>${s.proveedor_externo?esc(s.proveedor_externo):'<span class="mut">no configurado</span>'}</td></tr>
+ <tr><td>Registro de demos</td><td>${s.registro_demos_abierto?'Abierto':'Cerrado'}</td></tr>
+ <tr><td>Base de datos</td><td>${s.base_datos.mb} MB <span class="mut">(${esc(s.base_datos.archivo)})</span></td></tr>
+ <tr><td>Respaldos automáticos en el servidor</td><td>${s.respaldos.cantidad}${s.respaldos.ultimo?' · último: '+esc(s.respaldos.ultimo):' <span class="kpi-mal">ninguno</span>'}</td></tr></table>`}catch(e){$('sid').textContent=e.message}}
+$('sbk').onclick=async()=>{try{const r=await fetch('/v1/sistema/respaldo',{headers:{'X-API-Key':TOK()}});if(!r.ok)throw new Error('No se pudo generar el respaldo');const a=document.createElement('a');a.href=URL.createObjectURL(await r.blob());a.download=(r.headers.get('content-disposition')||'').split('filename=')[1]?.replace(/"/g,'')||'respaldo.db';a.click();toast('Respaldo descargado.')}catch(e){toast(e.message,1)}};
+$('sva').onclick=async()=>{try{const v=await api('/v1/audit/verify');$('smsg').innerHTML=v.ok?`<span class="kpi-ok">Bitácora ÍNTEGRA</span> (${v.registros} registros)`:`<span class="kpi-mal">Bitácora ALTERADA desde el registro ${v.primer_registro_alterado}</span>`}catch(e){toast(e.message,1)}};
+$('sdp').onclick=async()=>{if(!confirm('Se borrarán las consultas hechas por cuentas de demo vencidas hace más de 30 días. ¿Continuar?'))return;try{const r=await api('/v1/sistema/depurar-demos',{method:'POST'});toast(`Depuradas ${r.consultas_borradas} consultas de ${r.cuentas} cuentas.`);loadSis()}catch(e){toast(e.message,1)}};
+const ESTADO={DEMO_ACTIVO:'Demo activa',DEMO_VENCIDO:'Demo vencida',DEMO_AGOTADO:'Consultas agotadas',PAGADO:'Pagado',SUSPENDIDO:'Suspendido'};
+async function loadCl(){try{const [rs,l]=await Promise.all([api('/v1/clientes/resumen'),api('/v1/clientes?estado='+encodeURIComponent($('cle').value)+'&texto='+encodeURIComponent($('clx').value))]);
+ $('clt').innerHTML=[['Clientes',rs.total],['Demos activas',rs.DEMO_ACTIVO],['Vencidas / agotadas',rs.DEMO_VENCIDO+rs.DEMO_AGOTADO],['Pagados',rs.PAGADO],['Suspendidos',rs.SUSPENDIDO]].map(x=>`<div class="tile"><b>${x[1]}</b><span>${x[0]}</span></div>`).join('');
+ $('cll').innerHTML=l.length?`<table><tr><th>Cliente</th><th>Estado</th><th>Uso</th><th>Vence</th><th>Contacto</th><th></th></tr>${l.map(x=>`<tr><td><b>${esc(x.organizacion)}</b><div class="mut">${esc(x.nombre)} · ${esc(x.tipo||'')}</div><div class="mut">usuario: ${esc(x.usuario)} · alta ${esc(fdt(x.creado))} (${esc(x.origen||'')})</div>${x.notas?`<div class="mut">📝 ${esc(x.notas)}</div>`:''}</td>
+ <td><span class="pill p-${x.estado}">${ESTADO[x.estado]||x.estado}</span></td><td>${x.plan=='DEMO'?`${x.consultas_usadas}/${x.consultas_max}`:'Sin límite'}</td><td>${x.demo_expira?esc(fdt(x.demo_expira)):'—'}</td>
+ <td>${esc(x.email)}<div class="mut">${esc(x.telefono||'')}</div></td>
+ <td>${x.plan=='DEMO'?`<button class="sec" onclick="clAct(${x.id},'extender')">Extender demo</button> <button onclick="clAct(${x.id},'pagado')">Marcar como pagado</button>`:`<button class="sec" onclick="clAct(${x.id},'demo')">Volver a demo</button>`}
+ <button class="sec" onclick="clAct(${x.id},'${x.estado=='SUSPENDIDO'?'reactivar':'suspender'}')">${x.estado=='SUSPENDIDO'?'Reactivar':'Suspender'}</button> <button class="sec" onclick="clNota(${x.id})">Nota</button></td></tr>`).join('')}</table>`:'<p class="mut">Aún no hay clientes registrados.</p>'}catch(e){$('cll').textContent=e.message}}
+async function clAct(id,a){const msg={pagado:'¿Confirma que este cliente ya pagó? Se quitarán los límites de la demo.',suspender:'¿Suspender el acceso de este cliente?',extender:'¿Extender la demo?',demo:'¿Regresar a demo limitada?'}[a];
+ if(msg&&!confirm(msg))return;try{await api(`/v1/clientes/${id}/${a}`,{method:'POST',body:'{}'});loadCl()}catch(e){alert(e.message)}}
+async function clNota(id){const n=prompt('Nota interna sobre este cliente (pago, seguimiento…):');if(n===null)return;try{await api(`/v1/clientes/${id}/nota`,{method:'POST',body:JSON.stringify({valor:n})});loadCl()}catch(e){alert(e.message)}}
+$('clb').onclick=loadCl;$('cle').onchange=loadCl;
+$('clcsv').onclick=async()=>{const h=await fetch('/v1/clientes/export.csv',{headers:{'X-API-Key':TOK()}});const a=document.createElement('a');a.href=URL.createObjectURL(await h.blob());a.download='clientes.csv';a.click()};
+$('clnew').onclick=async()=>{const o=prompt('Organización:');if(!o)return;const n=prompt('Nombre del contacto:');if(!n)return;const e=prompt('Correo (será su usuario):');if(!e)return;const p=prompt('Contraseña inicial (mín. 10 caracteres):');if(!p)return;
+ const pg=confirm('¿Ya es cliente de pago?\nAceptar = PAGADO · Cancelar = DEMO');try{await api('/v1/clientes',{method:'POST',body:JSON.stringify({nombre:n,organizacion:o,email:e,contrasena:p,plan:pg?'PAGADO':'DEMO'})});loadCl()}catch(x){alert(x.message)}};
+async function loadUs(){try{const u=await api('/v1/users');$('ul').innerHTML=`<table><tr><th>Usuario</th><th>Rol</th><th>Estado</th><th>Último acceso</th><th></th></tr>${u.map(x=>`<tr><td><b>${esc(x.usuario)}</b></td><td><select onchange="cambiaRol('${esc(x.usuario)}',this.value)" ${x.usuario==ME.usuario?'disabled':''}>${['analista','supervisor','admin'].map(r=>`<option ${r==x.rol?'selected':''}>${r}</option>`).join('')}</select></td><td>${x.activo?'<span class="ok">Activo</span>':'<span class="mut">Desactivado</span>'}${x.puede_entrar_web?'':'<div class="mut">solo integración</div>'}</td><td>${x.ultimo_acceso?esc(fdt(x.ultimo_acceso)):'<span class="mut">nunca</span>'}</td><td><button class="sec" onclick="cambiarPw('${esc(x.usuario)}')">Cambiar contraseña</button> <button class="sec" onclick="alterna('${esc(x.usuario)}',${x.activo})">${x.activo?'Desactivar':'Activar'}</button></td></tr>`).join('')}</table>`}catch(e){$('ul').textContent=e.message}}
 $('nuc').onclick=async()=>{$('nmsg').textContent='';try{await api('/v1/users',{method:'POST',body:JSON.stringify({usuario:$('nu').value.trim(),rol:$('nr').value,contrasena:$('np').value})});$('nu').value='';$('np').value='';$('nmsg').textContent='Usuario creado.';loadUs()}catch(e){$('nmsg').textContent=e.message}};
+async function cambiaRol(n,r){try{await api(`/v1/users/${encodeURIComponent(n)}/rol`,{method:'POST',body:JSON.stringify({rol:r})});toast(`Rol de ${n}: ${r}. Aplica al volver a entrar.`)}catch(e){toast(e.message,1)}loadUs()}
 async function cambiarPw(n){const p=prompt(`Nueva contraseña para ${n} (mín. 10 caracteres):`);if(!p)return;try{await api(`/v1/users/${encodeURIComponent(n)}/password`,{method:'POST',body:JSON.stringify({contrasena:p})});alert('Contraseña actualizada.')}catch(e){alert(e.message)}}
 async function alterna(n,act){try{await api(`/v1/users/${encodeURIComponent(n)}/${act?'desactivar':'activar'}`,{method:'POST'});loadUs()}catch(e){alert(e.message)}}
 async function loadAl(){try{const a=await api('/v1/alerts'+($('st').value?'?status='+$('st').value:''));
@@ -296,6 +404,20 @@ async function loadLi(){try{const l=await api('/v1/lists');const MODO={AUTOMATIC
  const est=x=>x.estado=='OK'||x.estado=='CONECTADA'?`<span class="ok">${esc(x.estado)}</span>`:(x.desactualizada?`<span class="b ALTA">${esc(x.estado)}</span>`:`<span class="mut">${esc(x.estado)}</span>`);
  $('li').innerHTML=`<table><tr><th>Fuente</th><th>Estado</th><th>Registros</th><th>Última carga</th><th>Cómo se actualiza</th><th>Autoridad</th><th>Severidad</th></tr>${l.map(x=>`<tr><td><b>${esc(x.code)}</b><div class="mut">${esc(x.name)}</div>${x.modo=='MANUAL'&&ME&&ME.rol=='admin'?`<div style="margin-top:4px"><button class="sec" data-up="${esc(x.code)}">Cargar archivo…</button> <a href="#" data-tpl="1">plantilla</a></div>`:''}</td><td>${est(x)}</td><td>${x.ultima_version?.entry_count??'—'}</td><td>${esc(x.ultima_version?.fetched_at?.slice(0,16).replace('T',' ')||'—')}</td><td>${esc(MODO[x.modo]||'')}</td><td>${esc(x.authority)}</td><td>${badge(x.severity)}</td></tr>`).join('')}</table><p class="mut">«Se actualiza sola»: el sistema las descarga cada ${'6'} horas mientras el servicio de actualización esté encendido. «Carga manual»: un administrador sube el archivo con el botón «Cargar archivo…» (CSV con columnas nombre, rfc, curp, fecha_nacimiento, tipo, pais, alias, estatus, observaciones). Cada carga reemplaza la versión anterior: el archivo debe traer la lista completa.</p><input type="file" id="upf" class="hide" accept=".csv,.txt,text/csv">`}catch(e){$('li').textContent=e.message}}
 async function loadAu(){try{const v=await api('/v1/audit/verify');const a=await api('/v1/audit?limit=50');$('au').innerHTML=`<p>Integridad de la bitácora: <b class="${v.ok?'ok':'EXACTA'}">${v.ok?'ÍNTEGRA':'ALTERADA'}</b> (${v.registros} registros)</p><table><tr><th>#</th><th>Fecha</th><th>Usuario</th><th>Acción</th><th>Detalle</th></tr>${a.map(x=>`<tr><td>${x.seq}</td><td>${esc(x.ts.slice(0,19))}</td><td>${esc(x.actor)}</td><td>${esc(x.action)}</td><td class="mut">${esc(x.detail.slice(0,140))}</td></tr>`).join('')}</table>`}catch(e){$('au').textContent=e.message}}
+$('regLink').onclick=async e=>{e.preventDefault();try{const c=await fetch('/v1/registro/config').then(r=>r.json());
+ if(!c.abierto){$('lerr').textContent='El registro de demos está cerrado. Contacte a ventas'+(c.contacto?': '+c.contacto:'.');return}
+ $('regtxt').textContent=`Prueba gratuita de ${c.dias} días con hasta ${c.consultas} consultas. Funciones limitadas.`}catch(x){}
+ $('login').classList.add('hide');$('registro').classList.remove('hide');$('rn').focus()};
+$('regBack').onclick=e=>{e.preventDefault();$('registro').classList.add('hide');$('login').classList.remove('hide')};
+$('rgo').onclick=async()=>{$('rerr').textContent='';$('rgo').disabled=true;try{
+ if(!$('rac').checked)throw new Error('Debe aceptar las condiciones de la demo.');
+ const em=$('re').value.trim();
+ if($('rp').value.length<10)throw new Error('La contraseña debe tener al menos 10 caracteres.');
+ const rg=await api('/v1/registro',{method:'POST',body:JSON.stringify({nombre:$('rn').value,organizacion:$('ro').value,tipo:$('rt').value,email:em,telefono:$('rtel').value,contrasena:$('rp').value,acepta:true,web:$('rweb').value})});
+ const r=await api('/v1/login',{method:'POST',body:JSON.stringify({usuario:rg.usuario,contrasena:$('rp').value})}).catch(()=>null);
+ if(r){try{sessionStorage.setItem('tok',r.token)}catch(e){};const m=await api('/v1/me');ME={usuario:m.usuario,rol:m.rol,cuenta:m.cuenta};showApp()}
+ else{$('registro').classList.add('hide');$('login').classList.remove('hide');$('lerr').textContent='Demo creada. Ingrese con el usuario que se le asignó (su correo antes de la @) y su contraseña.'}
+ }catch(e){$('rerr').textContent=e.message}$('rgo').disabled=false};
 </script>
 </body>
 </html>

@@ -1,0 +1,289 @@
+diff --git a/docs/ADMINISTRACION.md b/docs/ADMINISTRACION.md
+index 2ccd1ff..7fc81c7 100644
+--- a/docs/ADMINISTRACION.md
++++ b/docs/ADMINISTRACION.md
+@@ -7,3 +7,5 @@
+ - **Ayuda** (todos): guía de uso, cómo leer los niveles de coincidencia y qué listas cubre el sistema.
+ 
+ Haga un respaldo antes de cada actualización y guárdelo cifrado fuera del servidor.
++
++- **Recuperación de contraseñas:** botón *Restablecer* (contraseña temporal de un solo uso) y cambio obligatorio en el primer ingreso. Ver RECUPERACION_CUENTA.md.
+diff --git a/docs/RECUPERACION_CUENTA.md b/docs/RECUPERACION_CUENTA.md
+new file mode 100644
+index 0000000..e6e9f53
+--- /dev/null
++++ b/docs/RECUPERACION_CUENTA.md
+@@ -0,0 +1,19 @@
++# Recuperación de cuentas y contraseñas
++
++**Un usuario olvidó su contraseña.** El administrador entra a *Usuarios* y pulsa **Restablecer**. El sistema genera una contraseña temporal de 12 caracteres, la muestra **una sola vez** y cierra las sesiones de ese usuario. Entréguela por un canal seguro (en persona o llamada, no por correo abierto). Al entrar, el usuario debe elegir una contraseña nueva antes de usar el sistema. La temporal no queda guardada en la bitácora.
++
++**Usuarios nuevos.** Los que crea el administrador desde la página entran con la contraseña inicial y deben cambiarla en su primer ingreso. También ocurre si el admin usa «Cambiar contraseña».
++
++**El administrador olvidó la suya.** Se recupera con acceso al servidor (Codespace o VPS), en la terminal del proyecto:
++
++    python -m pldscreen set-password NOMBRE_ADMIN
++
++Si no queda ningún administrador:
++
++    python -m pldscreen create-user NUEVO_ADMIN admin
++
++Por eso: proteja el acceso al servidor y mantenga **al menos dos administradores** (uno de respaldo).
++
++**Clientes de demo.** Son usuarios como cualquier otro: el administrador usa *Restablecer* desde Usuarios (el usuario es la parte del correo antes de la @, visible en Clientes).
++
++**No existe** el enlace «Olvidé mi contraseña» por correo: el sistema no envía correos. Si más adelante lo necesita, se agrega con un servicio SMTP.
+diff --git a/pldscreen/admin.py b/pldscreen/admin.py
+index 3349b21..fee452b 100644
+--- a/pldscreen/admin.py
++++ b/pldscreen/admin.py
+@@ -23,6 +23,13 @@ class AdminMixin:
+             raise ServiceError("La nueva contraseña debe ser distinta de la actual")
+         self.set_password(usuario, nueva, usuario)  # valida largo y cierra las demás sesiones
+ 
++    def restablecer_contrasena(self, name: str, actor: str) -> str:
++        """Genera una contraseña temporal aleatoria (se muestra una sola vez); el usuario deberá cambiarla al entrar."""
++        alfabeto = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789"  # sin caracteres ambiguos
++        temporal = "".join(secrets.choice(alfabeto) for _ in range(12))
++        self.set_password(name, temporal, actor, forzar_cambio=True)
++        return temporal
++
+     def set_role(self, name: str, role: str, actor: str) -> None:
+         from .service import ROLES, ServiceError
+         if role not in ROLES:
+diff --git a/pldscreen/api.py b/pldscreen/api.py
+index bbf972c..2823c2c 100644
+--- a/pldscreen/api.py
++++ b/pldscreen/api.py
+@@ -126,6 +126,8 @@ def create_app(service: Service | None = None) -> FastAPI:
+         if not u:
+             q.append(now)
+             raise HTTPException(401, "API key inválida o ausente (cabecera X-API-Key)")
++        if u.get("mc") and request.url.path not in ("/v1/me", "/v1/logout", "/v1/me/password"):
++            raise HTTPException(403, "Debe cambiar su contraseña antes de continuar (menú «Mi cuenta»).")
+         cuenta = svc.info_cuenta(u["name"])
+         u["demo"] = bool(cuenta and cuenta["plan"] == "DEMO")
+         u["cuenta"] = cuenta
+@@ -180,7 +182,7 @@ def create_app(service: Service | None = None) -> FastAPI:
+ 
+     @app.get("/v1/me", summary="Usuario de la sesión actual")
+     def me(u: dict = Depends(user)):
+-        r = {"usuario": u["name"], "rol": u["role"]}
++        r = {"usuario": u["name"], "rol": u["role"], "debe_cambiar_contrasena": bool(u.get("mc"))}
+         if u.get("cuenta"):
+             r["cuenta"] = u["cuenta"]
+         return r
+@@ -223,14 +225,21 @@ def create_app(service: Service | None = None) -> FastAPI:
+ 
+     @app.post("/v1/users", summary="Crea un usuario con contraseña (admin)")
+     def users_create(b: NuevoUsuario, u: dict = Depends(need("admin"))):
+-        run(svc.create_user, b.usuario, b.rol, b.contrasena)
++        run(svc.create_user, b.usuario, b.rol, b.contrasena, True)
+         return {"ok": True, "usuario": b.usuario}
+ 
+     @app.post("/v1/users/{name}/password", summary="Cambia la contraseña de un usuario (admin)")
+     def users_pw(name: str, b: NuevaContrasena, u: dict = Depends(need("admin"))):
+-        run(svc.set_password, name, b.contrasena, u["name"])
++        run(svc.set_password, name, b.contrasena, u["name"], True)
+         return {"ok": True}
+ 
++    @app.post("/v1/users/{name}/restablecer", summary="Genera una contraseña temporal para un usuario (admin)")
++    def users_reset(name: str, u: dict = Depends(need("admin"))):
++        if name == u["name"]:
++            raise HTTPException(400, "Para su propia contraseña use «Mi cuenta»")
++        return {"usuario": name, "temporal": run(svc.restablecer_contrasena, name, u["name"]),
++                "aviso": "Entréguela por un canal seguro. Se muestra una sola vez y deberá cambiarse al entrar."}
++
+     @app.post("/v1/users/{name}/{accion}", summary="Activa o desactiva un usuario (admin)")
+     def users_toggle(name: str, accion: str, u: dict = Depends(need("admin"))):
+         if accion not in ("activar", "desactivar"):
+diff --git a/pldscreen/db.py b/pldscreen/db.py
+index a688057..9490e60 100644
+--- a/pldscreen/db.py
++++ b/pldscreen/db.py
+@@ -117,6 +117,8 @@ def init_db(conn: sqlite3.Connection) -> None:
+     for c in ("pw_hash", "pw_salt"):
+         if c not in cols:
+             conn.execute(f"ALTER TABLE users ADD COLUMN {c} TEXT")
++    if "must_change" not in cols:
++        conn.execute("ALTER TABLE users ADD COLUMN must_change INTEGER DEFAULT 0")
+     conn.execute("CREATE TABLE IF NOT EXISTS sessions(token_hash TEXT PRIMARY KEY, name TEXT, role TEXT, "
+                  "created_at TEXT, expires_at TEXT)")
+     for s in SOURCES:
+diff --git a/pldscreen/service.py b/pldscreen/service.py
+index 95f5ed9..b07162b 100644
+--- a/pldscreen/service.py
++++ b/pldscreen/service.py
+@@ -77,7 +77,7 @@ class Service(ClientesMixin, AdminMixin):
+         if len(password or "") < self.MIN_PASSWORD:
+             raise ServiceError(f"La contraseña debe tener al menos {self.MIN_PASSWORD} caracteres")
+ 
+-    def create_user(self, name: str, role: str, password: str | None = None) -> str:
++    def create_user(self, name: str, role: str, password: str | None = None, forzar_cambio: bool = False) -> str:
+         """Crea usuario. Devuelve una API key (para integraciones). Con password también puede entrar por la página."""
+         if role not in ROLES:
+             raise ServiceError(f"Rol inválido. Use: {', '.join(ROLES)}")
+@@ -93,22 +93,23 @@ class Service(ClientesMixin, AdminMixin):
+         with self.lock, dbm.tx(self.conn):
+             if self.conn.execute("SELECT 1 FROM users WHERE name=?", (name,)).fetchone():
+                 raise ServiceError("Ese usuario ya existe", 409)
+-            self.conn.execute("INSERT INTO users(name,role,key_hash,created_at,pw_hash,pw_salt) VALUES(?,?,?,?,?,?)",
+-                              (name, role, hashlib.sha256(key.encode()).hexdigest(), dbm.now(), pw, salt))
++            self.conn.execute("INSERT INTO users(name,role,key_hash,created_at,pw_hash,pw_salt,must_change) VALUES(?,?,?,?,?,?,?)",
++                              (name, role, hashlib.sha256(key.encode()).hexdigest(), dbm.now(), pw, salt,
++                               1 if (forzar_cambio and password) else 0))
+             dbm.audit(self.conn, "sistema", "USUARIO_CREADO", {"usuario": name, "rol": role,
+                                                               "con_contrasena": bool(password)})
+         return key
+ 
+-    def set_password(self, name: str, password: str, actor: str = "sistema") -> None:
++    def set_password(self, name: str, password: str, actor: str = "sistema", forzar_cambio: bool = False) -> None:
+         self._check_password(password)
+         salt = secrets.token_hex(16)
+         with self.lock, dbm.tx(self.conn):
+-            cur = self.conn.execute("UPDATE users SET pw_hash=?, pw_salt=? WHERE name=? AND active=1",
+-                                    (self._pw_hash(password, salt), salt, name))
++            cur = self.conn.execute("UPDATE users SET pw_hash=?, pw_salt=?, must_change=? WHERE name=? AND active=1",
++                                    (self._pw_hash(password, salt), salt, 1 if forzar_cambio else 0, name))
+             if cur.rowcount == 0:
+                 raise ServiceError("Usuario no encontrado", 404)
+             self.conn.execute("DELETE FROM sessions WHERE name=?", (name,))
+-            dbm.audit(self.conn, actor, "CONTRASENA_CAMBIADA", {"usuario": name})
++            dbm.audit(self.conn, actor, "CONTRASENA_CAMBIADA", {"usuario": name, "debe_cambiarla": forzar_cambio})
+ 
+     def set_user_active(self, name: str, active: bool, actor: str) -> None:
+         with self.lock, dbm.tx(self.conn):
+@@ -123,8 +124,9 @@ class Service(ClientesMixin, AdminMixin):
+         with self.lock:
+             acc = self.ultimos_accesos()
+             return [{"usuario": r["name"], "rol": r["role"], "activo": bool(r["active"]),
+-                     "puede_entrar_web": bool(r["pw_hash"]), "creado": r["created_at"], "ultimo_acceso": acc.get(r["name"])}
+-                    for r in self.conn.execute("SELECT name,role,active,pw_hash,created_at FROM users ORDER BY name")]
++                     "puede_entrar_web": bool(r["pw_hash"]), "creado": r["created_at"], "ultimo_acceso": acc.get(r["name"]),
++                     "debe_cambiar_contrasena": bool(r["must_change"])}
++                    for r in self.conn.execute("SELECT name,role,active,pw_hash,created_at,must_change FROM users ORDER BY name")]
+ 
+     def login(self, usuario: str, contrasena: str) -> dict | None:
+         with self.lock:
+@@ -157,7 +159,7 @@ class Service(ClientesMixin, AdminMixin):
+             r = self.conn.execute("SELECT name,role FROM users WHERE key_hash=? AND active=1", (h,)).fetchone()
+             if not r:
+                 r = self.conn.execute(
+-                    "SELECT s.name name, s.role role FROM sessions s JOIN users u ON u.name=s.name AND u.active=1 "
++                    "SELECT s.name name, s.role role, u.must_change mc FROM sessions s JOIN users u ON u.name=s.name AND u.active=1 "
+                     "WHERE s.token_hash=? AND s.expires_at > ?", (h, dbm.now())).fetchone()
+         return dict(r) if r else None
+ 
+diff --git a/pldscreen/static/index.html b/pldscreen/static/index.html
+index c0c90b2..6dea238 100644
+--- a/pldscreen/static/index.html
++++ b/pldscreen/static/index.html
+@@ -222,7 +222,7 @@ function demoBar(){const c=ME&&ME.cuenta,b=$('demobar');if(!c||c.plan!='DEMO'){b
+  b.innerHTML=t+(c.contacto?` · Contacto: <b>${esc(c.contacto)}</b>`:'');b.classList.remove('hide')}
+ function showApp(){$('login').classList.add('hide');$('registro').classList.add('hide');$('app').classList.remove('hide');$('quien').textContent=`${ME.usuario} · ${ME.rol}`;
+  const demo=!!(ME.cuenta&&ME.cuenta.plan=='DEMO');
+- document.querySelectorAll('nav [data-t]').forEach(b=>{const t=b.dataset.t;b.classList.toggle('hide',!!((b.dataset.min&&RANK[ME.rol]<+b.dataset.min)||(demo&&!['consulta','listas','ayuda'].includes(t))))});demoBar();openTab('consulta')}
++ document.querySelectorAll('nav [data-t]').forEach(b=>{const t=b.dataset.t;b.classList.toggle('hide',!!((b.dataset.min&&RANK[ME.rol]<+b.dataset.min)||(demo&&!['consulta','listas','ayuda'].includes(t))))});demoBar();openTab('consulta');if(ME.debe)forzarCambio()}
+ async function api(p,o={}){const r=await fetch(p,{...o,headers:{'X-API-Key':TOK(),'Content-Type':'application/json'}});
+  const j=await r.json().catch(()=>({}));if(r.status==401&&p!='/v1/login'){showLogin('Su sesión terminó. Ingrese de nuevo.')}
+  if(r.status==402&&ME&&ME.cuenta&&p!='/v1/me'){api('/v1/me').then(m=>{ME.cuenta=m.cuenta;demoBar()}).catch(()=>{})}
+@@ -230,10 +230,10 @@ async function api(p,o={}){const r=await fetch(p,{...o,headers:{'X-API-Key':TOK(
+  if(!r.ok)throw new Error(typeof j.detail=='string'?j.detail:(r.statusText||'Error'));return j}
+ async function doLogin(){$('lerr').textContent='';$('lgo').disabled=true;try{
+  const r=await api('/v1/login',{method:'POST',body:JSON.stringify({usuario:$('lu').value,contrasena:$('lp').value})});
+- try{sessionStorage.setItem('tok',r.token)}catch(e){};const m=await api('/v1/me');ME={usuario:m.usuario,rol:m.rol,cuenta:m.cuenta};showApp()}catch(e){$('lerr').textContent=e.message}$('lgo').disabled=false}
++ try{sessionStorage.setItem('tok',r.token)}catch(e){};const m=await api('/v1/me');ME={usuario:m.usuario,rol:m.rol,cuenta:m.cuenta,debe:m.debe_cambiar_contrasena};showApp()}catch(e){$('lerr').textContent=e.message}$('lgo').disabled=false}
+ $('lgo').onclick=doLogin;$('lp').onkeydown=e=>{if(e.key=='Enter')doLogin()};$('lu').onkeydown=e=>{if(e.key=='Enter')$('lp').focus()};
+ $('salir').onclick=async()=>{try{await api('/v1/logout',{method:'POST'})}catch(e){}showLogin('')};
+-(async()=>{if(!TOK())return showLogin();try{const m=await api('/v1/me');ME={usuario:m.usuario,rol:m.rol,cuenta:m.cuenta};showApp()}catch(e){showLogin()}})();
++(async()=>{if(!TOK())return showLogin();try{const m=await api('/v1/me');ME={usuario:m.usuario,rol:m.rol,cuenta:m.cuenta,debe:m.debe_cambiar_contrasena};showApp()}catch(e){showLogin()}})();
+ function openTab(t){document.querySelectorAll('main>section').forEach(x=>x.classList.add('hide'));$(t).classList.remove('hide');
+  document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('on',b.dataset.t==t));({inicio:loadIn,alertas:loadAl,historial:()=>loadHi(true),listas:loadLi,auditoria:loadAu,usuarios:loadUs,clientes:loadCl,sistema:loadSis})[t]?.()}
+ document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>openTab(b.dataset.t));
+@@ -363,8 +363,10 @@ let _tt;function toast(m,err){const t=$('toast');t.textContent=m;t.style.backgro
+ window.alert=m=>toast(String(m));
+ $('mica').onclick=()=>{$('dctau').textContent=`${ME.usuario} · ${ME.rol}`;['cpa','cpn','cpr'].forEach(i=>$(i).value='');$('cperr').textContent='';$('dcta').showModal()};
+ $('cpx').onclick=()=>$('dcta').close();
++function forzarCambio(){$('dctau').textContent=`${ME.usuario} · Por seguridad debe elegir una contraseña nueva antes de continuar.`;['cpa','cpn','cpr'].forEach(i=>$(i).value='');$('cperr').textContent='';$('cpx').classList.add('hide');if(!$('dcta').open)$('dcta').showModal()}
++$('dcta').addEventListener('cancel',e=>{if(ME&&ME.debe)e.preventDefault()});
+ $('cpok').onclick=async()=>{$('cperr').textContent='';try{if($('cpn').value!==$('cpr').value)throw new Error('Las contraseñas nuevas no coinciden.');if($('cpn').value.length<10)throw new Error('Use al menos 10 caracteres.');
+- await api('/v1/me/password',{method:'POST',body:JSON.stringify({actual:$('cpa').value,nueva:$('cpn').value})});$('dcta').close();toast('Contraseña actualizada. Se cerraron sus otras sesiones.')}catch(e){$('cperr').textContent=e.message}};
++ await api('/v1/me/password',{method:'POST',body:JSON.stringify({actual:$('cpa').value,nueva:$('cpn').value})});ME.debe=false;$('cpx').classList.remove('hide');$('dcta').close();toast('Contraseña actualizada.');if(TOK()){try{const r2=await api('/v1/login',{method:'POST',body:JSON.stringify({usuario:ME.usuario,contrasena:$('cpn').value})});sessionStorage.setItem('tok',r2.token)}catch(e){}}}catch(e){$('cperr').textContent=e.message}};
+ async function loadSis(){try{const s=await api('/v1/sistema'),t=s.totales,fh=h=>h?esc(fdt(h)):'—';
+  $('sit').innerHTML=[['Consultas (24 h)',t.consultas_24h],['Consultas totales',t.consultas],['Alertas abiertas',t.alertas_abiertas],['Personas monitoreadas',t.personas_monitoreadas],['Registros en listas',t.registros_en_listas.toLocaleString('es-MX')],['Usuarios activos',t.usuarios_activos],['Clientes',t.clientes]].map(x=>`<div class="tile"><b>${x[1]}</b><span>${x[0]}</span></div>`).join('');
+  $('sid').innerHTML=`<table><tr><td>Versión</td><td><b>${esc(s.version)}</b></td></tr><tr><td>Hora del servidor (UTC)</td><td>${fh(s.hora_servidor_utc)}</td></tr><tr><td>Última carga de listas</td><td>${fh(s.ultima_carga_listas)}</td></tr>
+@@ -391,9 +393,11 @@ $('clb').onclick=loadCl;$('cle').onchange=loadCl;
+ $('clcsv').onclick=async()=>{const h=await fetch('/v1/clientes/export.csv',{headers:{'X-API-Key':TOK()}});const a=document.createElement('a');a.href=URL.createObjectURL(await h.blob());a.download='clientes.csv';a.click()};
+ $('clnew').onclick=async()=>{const o=prompt('Organización:');if(!o)return;const n=prompt('Nombre del contacto:');if(!n)return;const e=prompt('Correo (será su usuario):');if(!e)return;const p=prompt('Contraseña inicial (mín. 10 caracteres):');if(!p)return;
+  const pg=confirm('¿Ya es cliente de pago?\nAceptar = PAGADO · Cancelar = DEMO');try{await api('/v1/clientes',{method:'POST',body:JSON.stringify({nombre:n,organizacion:o,email:e,contrasena:p,plan:pg?'PAGADO':'DEMO'})});loadCl()}catch(x){alert(x.message)}};
+-async function loadUs(){try{const u=await api('/v1/users');$('ul').innerHTML=`<table><tr><th>Usuario</th><th>Rol</th><th>Estado</th><th>Último acceso</th><th></th></tr>${u.map(x=>`<tr><td><b>${esc(x.usuario)}</b></td><td><select onchange="cambiaRol('${esc(x.usuario)}',this.value)" ${x.usuario==ME.usuario?'disabled':''}>${['analista','supervisor','admin'].map(r=>`<option ${r==x.rol?'selected':''}>${r}</option>`).join('')}</select></td><td>${x.activo?'<span class="ok">Activo</span>':'<span class="mut">Desactivado</span>'}${x.puede_entrar_web?'':'<div class="mut">solo integración</div>'}</td><td>${x.ultimo_acceso?esc(fdt(x.ultimo_acceso)):'<span class="mut">nunca</span>'}</td><td><button class="sec" onclick="cambiarPw('${esc(x.usuario)}')">Cambiar contraseña</button> <button class="sec" onclick="alterna('${esc(x.usuario)}',${x.activo})">${x.activo?'Desactivar':'Activar'}</button></td></tr>`).join('')}</table>`}catch(e){$('ul').textContent=e.message}}
++async function loadUs(){try{const u=await api('/v1/users');$('ul').innerHTML=`<table><tr><th>Usuario</th><th>Rol</th><th>Estado</th><th>Último acceso</th><th></th></tr>${u.map(x=>`<tr><td><b>${esc(x.usuario)}</b></td><td><select onchange="cambiaRol('${esc(x.usuario)}',this.value)" ${x.usuario==ME.usuario?'disabled':''}>${['analista','supervisor','admin'].map(r=>`<option ${r==x.rol?'selected':''}>${r}</option>`).join('')}</select></td><td>${x.activo?'<span class="ok">Activo</span>':'<span class="mut">Desactivado</span>'}${x.puede_entrar_web?'':'<div class="mut">solo integración</div>'}</td><td>${x.ultimo_acceso?esc(fdt(x.ultimo_acceso)):'<span class="mut">nunca</span>'}</td><td><button class="sec" onclick="cambiarPw('${esc(x.usuario)}')">Cambiar contraseña</button> ${x.usuario==ME.usuario?'':`<button class="sec" onclick="restablece('${esc(x.usuario)}')">Restablecer</button>`}${x.debe_cambiar_contrasena?' <span class="b MEDIA">cambio pendiente</span>':''} <button class="sec" onclick="alterna('${esc(x.usuario)}',${x.activo})">${x.activo?'Desactivar':'Activar'}</button></td></tr>`).join('')}</table>`}catch(e){$('ul').textContent=e.message}}
+ $('nuc').onclick=async()=>{$('nmsg').textContent='';try{await api('/v1/users',{method:'POST',body:JSON.stringify({usuario:$('nu').value.trim(),rol:$('nr').value,contrasena:$('np').value})});$('nu').value='';$('np').value='';$('nmsg').textContent='Usuario creado.';loadUs()}catch(e){$('nmsg').textContent=e.message}};
+ async function cambiaRol(n,r){try{await api(`/v1/users/${encodeURIComponent(n)}/rol`,{method:'POST',body:JSON.stringify({rol:r})});toast(`Rol de ${n}: ${r}. Aplica al volver a entrar.`)}catch(e){toast(e.message,1)}loadUs()}
++async function restablece(n){if(!confirm(`Se generará una contraseña temporal para ${n} y se cerrarán sus sesiones. ¿Continuar?`))return;
++ try{const r=await api(`/v1/users/${encodeURIComponent(n)}/restablecer`,{method:'POST'});prompt(`Contraseña temporal de ${n} (cópiela ahora: no se volverá a mostrar). Deberá cambiarla al entrar.`,r.temporal);loadUs()}catch(e){toast(e.message,1)}}
+ async function cambiarPw(n){const p=prompt(`Nueva contraseña para ${n} (mín. 10 caracteres):`);if(!p)return;try{await api(`/v1/users/${encodeURIComponent(n)}/password`,{method:'POST',body:JSON.stringify({contrasena:p})});alert('Contraseña actualizada.')}catch(e){alert(e.message)}}
+ async function alterna(n,act){try{await api(`/v1/users/${encodeURIComponent(n)}/${act?'desactivar':'activar'}`,{method:'POST'});loadUs()}catch(e){alert(e.message)}}
+ async function loadAl(){try{const a=await api('/v1/alerts'+($('st').value?'?status='+$('st').value:''));
+@@ -415,7 +419,7 @@ $('rgo').onclick=async()=>{$('rerr').textContent='';$('rgo').disabled=true;try{
+  if($('rp').value.length<10)throw new Error('La contraseña debe tener al menos 10 caracteres.');
+  const rg=await api('/v1/registro',{method:'POST',body:JSON.stringify({nombre:$('rn').value,organizacion:$('ro').value,tipo:$('rt').value,email:em,telefono:$('rtel').value,contrasena:$('rp').value,acepta:true,web:$('rweb').value})});
+  const r=await api('/v1/login',{method:'POST',body:JSON.stringify({usuario:rg.usuario,contrasena:$('rp').value})}).catch(()=>null);
+- if(r){try{sessionStorage.setItem('tok',r.token)}catch(e){};const m=await api('/v1/me');ME={usuario:m.usuario,rol:m.rol,cuenta:m.cuenta};showApp()}
++ if(r){try{sessionStorage.setItem('tok',r.token)}catch(e){};const m=await api('/v1/me');ME={usuario:m.usuario,rol:m.rol,cuenta:m.cuenta,debe:m.debe_cambiar_contrasena};showApp()}
+  else{$('registro').classList.add('hide');$('login').classList.remove('hide');$('lerr').textContent='Demo creada. Ingrese con el usuario que se le asignó (su correo antes de la @) y su contraseña.'}
+  }catch(e){$('rerr').textContent=e.message}$('rgo').disabled=false};
+ </script>
+diff --git a/tests/test_admin.py b/tests/test_admin.py
+index a57af3d..f57ed0e 100644
+--- a/tests/test_admin.py
++++ b/tests/test_admin.py
+@@ -73,3 +73,35 @@ def test_depurar_demos(env):
+     assert c.post("/v1/sistema/depurar-demos", headers=ha).json()["consultas_borradas"] == 0  # aún vigente
+     svc.conn.execute("UPDATE customers SET demo_expira='2000-01-01T00:00:00+00:00'")
+     assert c.post("/v1/sistema/depurar-demos", headers=ha).json()["consultas_borradas"] == 1
++
++
++def test_cambio_forzado_y_restablecer(env):
++    svc, c = env
++    ha = tok(c, "admin1", "AdminClave2026!")
++    # usuario creado por el admin: debe cambiar la contraseña al entrar
++    assert c.post("/v1/users", json={"usuario": "beto", "rol": "analista", "contrasena": "Inicial2026!!"}, headers=ha).status_code == 200
++    hb = tok(c, "beto", "Inicial2026!!")
++    assert c.get("/v1/me", headers=hb).json()["debe_cambiar_contrasena"] is True
++    assert c.post("/v1/screen", json={"nombre": "Juan Perez"}, headers=hb).status_code == 403
++    assert c.post("/v1/me/password", json={"actual": "Inicial2026!!", "nueva": "ElegidaPorBeto26"}, headers=hb).status_code == 200
++    hb = tok(c, "beto", "ElegidaPorBeto26")
++    assert c.get("/v1/me", headers=hb).json()["debe_cambiar_contrasena"] is False
++    assert c.post("/v1/screen", json={"nombre": "Juan Perez"}, headers=hb).status_code == 200
++    # restablecer: contraseña temporal aleatoria, un solo uso, cierra sesiones
++    r = c.post("/v1/users/beto/restablecer", headers=ha)
++    t = r.json()["temporal"]
++    assert r.status_code == 200 and len(t) == 12
++    assert c.get("/v1/me", headers=hb).status_code == 401  # su sesión anterior se cerró
++    assert c.post("/v1/login", json={"usuario": "beto", "contrasena": "ElegidaPorBeto26"}).status_code == 401
++    ht = tok(c, "beto", t)
++    assert c.get("/v1/me", headers=ht).json()["debe_cambiar_contrasena"] is True
++    # la contraseña temporal no queda en la bitácora
++    assert t not in str(svc.audit_tail(50))
++    assert c.post("/v1/users/admin1/restablecer", headers=ha).status_code == 400  # a uno mismo: Mi cuenta
++    assert c.post("/v1/users/beto/restablecer", headers=hb).status_code in (401, 403)
++
++
++def test_cli_o_integracion_no_forza_cambio(env):
++    _, c = env
++    h = tok(c, "ana", "ClaveAna2026!")  # creada sin forzar (CLI/fixture)
++    assert c.get("/v1/me", headers=h).json()["debe_cambiar_contrasena"] is False
+diff --git a/tests/test_login.py b/tests/test_login.py
+index ed2807c..af806fb 100644
+--- a/tests/test_login.py
++++ b/tests/test_login.py
+@@ -22,7 +22,7 @@ def test_login_ok_y_uso_de_sesion(client):
+     assert r.status_code == 200 and r.json()["rol"] == "analista"
+     tok = r.json()["token"]
+     h = {"X-API-Key": tok}
+-    assert client.get("/v1/me", headers=h).json() == {"usuario": "ana", "rol": "analista"}
++    assert client.get("/v1/me", headers=h).json() == {"usuario": "ana", "rol": "analista", "debe_cambiar_contrasena": False}
+     assert client.post("/v1/screen", json={"nombre": "Persona Inventada Cualquiera"}, headers=h).status_code == 200
+     assert client.get("/v1/users", headers=h).status_code == 403      # analista no administra usuarios
+     assert client.post("/v1/logout", headers=h).status_code == 200

@@ -117,12 +117,15 @@ def _pie(huella: str, off: float) -> str:
             "valide con su asesor).</div>")
 
 
-def render_consulta(folio: int, row, res: dict, settings) -> str:
+def render_consulta(folio: int, row, res: dict, settings, demo: bool = False) -> str:
     off, org = settings.tz_offset_hours, getattr(settings, "org_name", "")
     c = res.get("consulta", {}) or {}
     clase, texto = _RESULT.get(res.get("resultado"), ("media", str(res.get("resultado", "")).replace("_", " ").capitalize()))
     ms = res.get("coincidencias") or []
     body = _enc("Constancia de consulta en listas – PLD/FT", f"Folio de consulta", f"No. {folio}", org)
+    if demo:
+        body += _banner("media", "VERSIÓN DE DEMOSTRACIÓN – sin validez para expedientes",
+                        "Cuenta de prueba con funciones limitadas. Adquiera el servicio completo para emitir constancias definitivas.")
     body += _banner(clase, texto, f"Riesgo sugerido: {res.get('riesgo_sugerido', '—')}" +
                     (f" · Nivel máximo de coincidencia: {res.get('nivel_maximo')}" if res.get("nivel_maximo") else ""))
     body += "<h2>Datos de la consulta</h2>" + _kv([

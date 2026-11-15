@@ -47,6 +47,10 @@ CREATE INDEX IF NOT EXISTS ix_ops_exp ON operations(expediente);
 CREATE TABLE IF NOT EXISTS users(
   id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, role TEXT, key_hash TEXT UNIQUE, active INTEGER DEFAULT 1,
   created_at TEXT);
+CREATE TABLE IF NOT EXISTS customers(
+  id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT, organizacion TEXT, tipo TEXT, email TEXT, telefono TEXT,
+  user_name TEXT UNIQUE, plan TEXT DEFAULT 'DEMO', demo_expira TEXT, consultas_max INTEGER, consultas_usadas INTEGER DEFAULT 0,
+  origen TEXT, notas TEXT, creado TEXT, pagado_en TEXT, ultimo_acceso TEXT);
 CREATE TABLE IF NOT EXISTS operation_parties(
   operation_id INTEGER, subject_id INTEGER, rol TEXT, PRIMARY KEY(operation_id, subject_id, rol));
 CREATE TABLE IF NOT EXISTS audit_log(

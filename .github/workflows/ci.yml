@@ -8,5 +8,5 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
       - run: pip install -r requirements.txt
-      - run: pytest -q tests/test_matching.py tests/test_parsers.py tests/test_workflow.py tests/test_operaciones.py tests/test_proveedores.py tests/test_login.py tests/test_49bis.py tests/test_ficha_historial.py
+      - run: pytest -q tests/test_matching.py tests/test_parsers.py tests/test_workflow.py tests/test_operaciones.py tests/test_proveedores.py tests/test_login.py tests/test_49bis.py tests/test_ficha_historial.py tests/test_clientes.py tests/test_admin.py
       - run: python tools/benchmark.py 20000

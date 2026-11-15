@@ -4,6 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import re
 import time
 from collections import defaultdict, deque
 
@@ -55,6 +56,41 @@ class NuevaContrasena(BaseModel):
     contrasena: str = Field(..., min_length=10)
 
 
+class Registro(BaseModel):
+    nombre: str = Field(..., max_length=120)
+    organizacion: str = Field(..., max_length=160)
+    tipo: str | None = "OTRO"
+    email: str = Field(..., max_length=200)
+    telefono: str | None = Field(None, max_length=30)
+    contrasena: str = Field(..., min_length=10, max_length=200)
+    acepta: bool = False
+    web: str | None = Field(None, description="Campo trampa anti-bots: debe ir vacío")
+
+
+class AltaCliente(BaseModel):
+    nombre: str
+    organizacion: str
+    tipo: str | None = "OTRO"
+    email: str
+    telefono: str | None = None
+    notas: str | None = None
+    plan: str = "DEMO"
+    contrasena: str = Field(..., min_length=10)
+
+
+class AccionCliente(BaseModel):
+    valor: str | None = None
+
+
+class CambioContrasena(BaseModel):
+    actual: str
+    nueva: str = Field(..., min_length=10, max_length=200)
+
+
+class CambioRol(BaseModel):
+    rol: str
+
+
 class Resolucion(BaseModel):
     resolucion: str = Field(..., description="FALSO_POSITIVO | CONFIRMADA | DEVOLVER (solo supervisor, para regresar una propuesta)")
     nota: str = Field(..., min_length=10)
@@ -62,7 +98,7 @@ class Resolucion(BaseModel):
 
 def create_app(service: Service | None = None) -> FastAPI:
     svc = service or Service()
-    app = FastAPI(title="PLD Screening – Consulta de listas (LFPIORPI)", version="1.0.0")
+    app = FastAPI(title="PLD Screening – Consulta de listas (LFPIORPI)", version="2.0.0")
     app.state.svc = svc
 
     fails: dict[str, deque] = defaultdict(deque)  # IP → instantes de intentos fallidos
@@ -78,6 +114,11 @@ def create_app(service: Service | None = None) -> FastAPI:
             raise HTTPException(429, "Demasiados intentos fallidos; espere 5 minutos")
         return q
 
+    reg_hits: dict[str, deque] = defaultdict(deque)  # IP → instantes de registros (máx. 5 por hora)
+    SCREEN_ID = re.compile(r"^/v1/screenings/\d+(/constancia)?$")
+    DEMO_OK = [("POST", re.compile(r"^/v1/screen$")), ("GET", re.compile(r"^/v1/me$")), ("POST", re.compile(r"^/v1/logout$")), ("POST", re.compile(r"^/v1/me/password$")),
+               ("GET", re.compile(r"^/v1/lists$")), ("GET", re.compile(r"^/v1/entries/\d+$")), ("GET", SCREEN_ID)]
+
     def user(request: Request, x_api_key: str | None = Header(None)) -> dict:
         ip = _ip(request)
         q, now = _limit(ip), time.time()
@@ -85,6 +126,19 @@ def create_app(service: Service | None = None) -> FastAPI:
         if not u:
             q.append(now)
             raise HTTPException(401, "API key inválida o ausente (cabecera X-API-Key)")
+        cuenta = svc.info_cuenta(u["name"])
+        u["demo"] = bool(cuenta and cuenta["plan"] == "DEMO")
+        u["cuenta"] = cuenta
+        if u["demo"]:
+            path, m = request.url.path, request.method
+            libre = path in ("/v1/me", "/v1/logout", "/v1/me/password")
+            if not libre:
+                if cuenta["estado"] == "DEMO_VENCIDO":
+                    raise HTTPException(402, "Su demo terminó. Para seguir usando el sistema contacte a ventas para adquirir la versión completa.")
+                if not any(m == mm and rx.match(path) for mm, rx in DEMO_OK):
+                    raise HTTPException(403, "Esta función no está incluida en la demo. Disponible en la versión completa.")
+                if m == "POST" and path == "/v1/screen" and cuenta["estado"] == "DEMO_AGOTADO":
+                    raise HTTPException(402, "Agotó las consultas de su demo. Contacte a ventas para adquirir la versión completa.")
         return u
 
     def need(role: str):
@@ -126,7 +180,42 @@ def create_app(service: Service | None = None) -> FastAPI:
 
     @app.get("/v1/me", summary="Usuario de la sesión actual")
     def me(u: dict = Depends(user)):
-        return {"usuario": u["name"], "rol": u["role"]}
+        r = {"usuario": u["name"], "rol": u["role"]}
+        if u.get("cuenta"):
+            r["cuenta"] = u["cuenta"]
+        return r
+
+    @app.post("/v1/me/password", summary="Cambia la contraseña propia (pide la actual)")
+    def me_pw(b: CambioContrasena, request: Request, u: dict = Depends(user)):
+        q = _limit(_ip(request))
+        try:
+            svc.cambiar_mi_contrasena(u["name"], b.actual, b.nueva)
+        except ServiceError as e:
+            if e.status == 400 and "actual" in str(e):
+                q.append(time.time())
+            raise HTTPException(e.status, str(e))
+        return {"ok": True}
+
+    @app.post("/v1/users/{name}/rol", summary="Cambia el rol de un usuario (admin)")
+    def users_rol(name: str, b: CambioRol, u: dict = Depends(need("admin"))):
+        if name == u["name"]:
+            raise HTTPException(400, "No puede cambiar su propio rol")
+        run(svc.set_role, name, b.rol, u["name"])
+        return {"ok": True}
+
+    @app.get("/v1/sistema", summary="Estado del sistema (admin)")
+    def sistema(u: dict = Depends(need("admin"))):
+        return svc.estado_sistema()
+
+    @app.get("/v1/sistema/respaldo", summary="Descarga un respaldo consistente de la base (admin)")
+    def respaldo(u: dict = Depends(need("admin"))):
+        nombre, datos = svc.respaldo_bytes(u["name"])
+        return Response(datos, media_type="application/octet-stream",
+                        headers={"Content-Disposition": f'attachment; filename="{nombre}"'})
+
+    @app.post("/v1/sistema/depurar-demos", summary="Borra consultas de demos vencidas hace más de 30 días (admin)")
+    def depurar(u: dict = Depends(need("admin"))):
+        return svc.depurar_demos(30, u["name"])
 
     @app.get("/v1/users", summary="Lista de usuarios (admin)")
     def users(u: dict = Depends(need("admin"))):
@@ -151,10 +240,63 @@ def create_app(service: Service | None = None) -> FastAPI:
         run(svc.set_user_active, name, accion == "activar", u["name"])
         return {"ok": True}
 
+    # ---- registro de prospectos (público) y panel de clientes (admin)
+    @app.get("/v1/registro/config", summary="Datos públicos del formulario de registro")
+    def registro_cfg():
+        return {"abierto": svc.s.registro_abierto, "dias": svc.s.demo_dias, "consultas": svc.s.demo_consultas,
+                "contacto": svc.s.contacto_ventas}
+
+    @app.post("/v1/registro", summary="Registro público: crea una cuenta de demo limitada")
+    def registro(b: Registro, request: Request):
+        if not svc.s.registro_abierto:
+            raise HTTPException(403, "El registro de demos está cerrado. Contacte a ventas.")
+        if b.web:  # bot
+            return {"ok": True}
+        if not b.acepta:
+            raise HTTPException(400, "Debe aceptar los términos de la demo")
+        ip, now = _ip(request), time.time()
+        q = reg_hits[ip]
+        while q and now - q[0] > 3600:
+            q.popleft()
+        if len(q) >= 5:
+            raise HTTPException(429, "Demasiados registros desde esta red; intente más tarde")
+        r = run(svc.registrar_cliente, b.model_dump(), b.contrasena, "FORMULARIO", "registro")
+        q.append(now)
+        return r
+
+    @app.get("/v1/clientes", summary="Panel de clientes y demos (admin)")
+    def clientes(estado: str | None = None, texto: str | None = None, u: dict = Depends(need("admin"))):
+        return svc.listar_clientes(estado, texto)
+
+    @app.get("/v1/clientes/resumen", summary="Totales por estado (admin)")
+    def clientes_resumen(u: dict = Depends(need("admin"))):
+        return svc.resumen_clientes()
+
+    @app.get("/v1/clientes/export.csv", summary="Exporta clientes a CSV (admin)")
+    def clientes_csv(u: dict = Depends(need("admin"))):
+        return Response(svc.clientes_csv(), media_type="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": 'attachment; filename="clientes.csv"'})
+
+    @app.post("/v1/clientes", summary="Alta manual de un cliente (admin)")
+    def clientes_alta(b: AltaCliente, u: dict = Depends(need("admin"))):
+        if b.plan not in ("DEMO", "PAGADO"):
+            raise HTTPException(400, "Plan inválido")
+        return run(svc.registrar_cliente, b.model_dump(), b.contrasena, "ALTA_MANUAL", u["name"], b.plan)
+
+    @app.post("/v1/clientes/{cid}/{accion}", summary="Extender demo, activar pago, suspender… (admin)")
+    def clientes_accion(cid: int, accion: str, b: AccionCliente | None = None, u: dict = Depends(need("admin"))):
+        return run(svc.accion_cliente, cid, accion, u["name"], b.valor if b else None)
+
     # ---- consultas
     @app.post("/v1/screen", summary="Consulta una persona (y sus relacionados) contra todas las listas")
     def screen(p: Persona, u: dict = Depends(need("analista"))):
         d = p.model_dump(exclude_none=True)
+        if u.get("demo"):  # la demo no guarda sujetos ni alertas ni consulta relacionados
+            d.pop("referencia", None)
+            d.pop("relacionados", None)
+            r = run(svc.screen, d, u["name"], persist=False)
+            svc.usar_consulta(u["name"])
+            return r
         return run(svc.screen, d, u["name"], persist=p.crear_alertas)
 
     @app.post("/v1/screen/batch", summary="Consulta por lote (JSON, máx. 1000)")
@@ -187,7 +329,7 @@ def create_app(service: Service | None = None) -> FastAPI:
 
     @app.get("/v1/screenings/{sid}", summary="Resultado completo de una consulta anterior")
     def consulta_get(sid: int, u: dict = Depends(need("analista"))):
-        return run(svc.get_screening, sid)
+        return run(svc.get_screening, sid, u["name"] if u.get("demo") else None)
 
     @app.get("/v1/entries/{entry_id}", summary="Ficha completa de un registro de lista")
     def ficha(entry_id: int, u: dict = Depends(need("analista"))):
@@ -195,7 +337,7 @@ def create_app(service: Service | None = None) -> FastAPI:
 
     @app.get("/v1/screenings/{sid}/constancia", response_class=HTMLResponse, summary="Constancia imprimible")
     def constancia(sid: int, u: dict = Depends(need("analista"))):
-        return run(svc.constancia_html, sid)
+        return run(svc.constancia_html, sid, u["name"] if u.get("demo") else None, bool(u.get("demo")))
 
     # ---- operaciones / expedientes (notarial / inmobiliario)
     @app.post("/v1/operaciones", summary="Consulta todas las partes de un expediente y emite dictamen consolidado")

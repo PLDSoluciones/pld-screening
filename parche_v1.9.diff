@@ -1,0 +1,747 @@
+diff --git a/.env.example b/.env.example
+index ba8c465..cab7165 100644
+--- a/.env.example
++++ b/.env.example
+@@ -33,3 +33,9 @@ DOMAIN=pld.sunotaria.mx
+ # none | mock (datos ficticios, sin clave) | opensanctions | dilisense
+ PLD_EXT_PROVIDER=none
+ PLD_EXT_API_KEY=
++
++# Demo para prospectos (registro público desde la página de inicio de sesión)
++PLD_REGISTRO_ABIERTO=1        # 0 = cierra el formulario de registro
++PLD_DEMO_DIAS=2               # duración de la demo
++PLD_DEMO_CONSULTAS=20         # consultas incluidas en la demo
++PLD_CONTACTO_VENTAS=          # texto que ven los prospectos al vencer la demo (correo o teléfono)
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index ad51750..27c8565 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -8,5 +8,5 @@ jobs:
+       - uses: actions/setup-python@v5
+         with: { python-version: "3.12" }
+       - run: pip install -r requirements.txt
+-      - run: pytest -q tests/test_matching.py tests/test_parsers.py tests/test_workflow.py tests/test_operaciones.py tests/test_proveedores.py tests/test_login.py tests/test_49bis.py tests/test_ficha_historial.py
++      - run: pytest -q tests/test_matching.py tests/test_parsers.py tests/test_workflow.py tests/test_operaciones.py tests/test_proveedores.py tests/test_login.py tests/test_49bis.py tests/test_ficha_historial.py tests/test_clientes.py
+       - run: python tools/benchmark.py 20000
+diff --git a/docs/CLIENTES_Y_DEMOS.md b/docs/CLIENTES_Y_DEMOS.md
+new file mode 100644
+index 0000000..4d59f16
+--- /dev/null
++++ b/docs/CLIENTES_Y_DEMOS.md
+@@ -0,0 +1,15 @@
++# Clientes y demos
++
++**Registro público.** En la pantalla de inicio de sesión aparece «Solicite una demo gratuita». El prospecto llena nombre, organización, correo y contraseña, y acepta las condiciones. Se crea una cuenta de rol *analista* con demo de `PLD_DEMO_DIAS` días y `PLD_DEMO_CONSULTAS` consultas.
++
++**Qué incluye la demo:** consulta individual contra las listas, ficha del registro y constancia con marca «VERSIÓN DE DEMOSTRACIÓN». **No incluye:** lotes, expedientes, alertas, historial, auditoría ni guardado de personas. La demo solo ve sus propias consultas.
++
++**Panel del administrador (pestaña Clientes):** totales por estado, búsqueda, exportar a CSV, alta manual, y por cliente: *Extender demo*, *Marcar como pagado* (quita los límites), *Volver a demo*, *Suspender/Reactivar* y *Nota*. Todo queda en la bitácora de auditoría.
++
++**Estados:** Demo activa · Demo vencida · Consultas agotadas · Pagado · Suspendido.
++
++## Límites que debe conocer
++- Todos los clientes **comparten la misma base de datos**. Un cliente *Pagado* con acceso completo vería el historial y expedientes de los demás. Para clientes de pago use **una instalación (y base) por cliente**, o pida que se agregue aislamiento por cliente.
++- No se verifica el correo (no hay envío de correos configurado): cualquiera puede registrar una cuenta. El registro tiene límite de 5 por hora por red y un campo anti-bots; si hay abuso, ponga `PLD_REGISTRO_ABIERTO=0` o suspenda la cuenta.
++- Los cobros no están integrados: «Marcar como pagado» es manual.
++- Publique su propio aviso de privacidad y términos antes de abrir el registro al público.
+diff --git a/pldscreen/api.py b/pldscreen/api.py
+index 9fda219..eab84fd 100644
+--- a/pldscreen/api.py
++++ b/pldscreen/api.py
+@@ -4,6 +4,7 @@ from __future__ import annotations
+ from pathlib import Path
+ from typing import Any
+ 
++import re
+ import time
+ from collections import defaultdict, deque
+ 
+@@ -55,6 +56,32 @@ class NuevaContrasena(BaseModel):
+     contrasena: str = Field(..., min_length=10)
+ 
+ 
++class Registro(BaseModel):
++    nombre: str = Field(..., max_length=120)
++    organizacion: str = Field(..., max_length=160)
++    tipo: str | None = "OTRO"
++    email: str = Field(..., max_length=200)
++    telefono: str | None = Field(None, max_length=30)
++    contrasena: str = Field(..., min_length=10, max_length=200)
++    acepta: bool = False
++    web: str | None = Field(None, description="Campo trampa anti-bots: debe ir vacío")
++
++
++class AltaCliente(BaseModel):
++    nombre: str
++    organizacion: str
++    tipo: str | None = "OTRO"
++    email: str
++    telefono: str | None = None
++    notas: str | None = None
++    plan: str = "DEMO"
++    contrasena: str = Field(..., min_length=10)
++
++
++class AccionCliente(BaseModel):
++    valor: str | None = None
++
++
+ class Resolucion(BaseModel):
+     resolucion: str = Field(..., description="FALSO_POSITIVO | CONFIRMADA | DEVOLVER (solo supervisor, para regresar una propuesta)")
+     nota: str = Field(..., min_length=10)
+@@ -78,6 +105,11 @@ def create_app(service: Service | None = None) -> FastAPI:
+             raise HTTPException(429, "Demasiados intentos fallidos; espere 5 minutos")
+         return q
+ 
++    reg_hits: dict[str, deque] = defaultdict(deque)  # IP → instantes de registros (máx. 5 por hora)
++    SCREEN_ID = re.compile(r"^/v1/screenings/\d+(/constancia)?$")
++    DEMO_OK = [("POST", re.compile(r"^/v1/screen$")), ("GET", re.compile(r"^/v1/me$")), ("POST", re.compile(r"^/v1/logout$")),
++               ("GET", re.compile(r"^/v1/lists$")), ("GET", re.compile(r"^/v1/entries/\d+$")), ("GET", SCREEN_ID)]
++
+     def user(request: Request, x_api_key: str | None = Header(None)) -> dict:
+         ip = _ip(request)
+         q, now = _limit(ip), time.time()
+@@ -85,6 +117,19 @@ def create_app(service: Service | None = None) -> FastAPI:
+         if not u:
+             q.append(now)
+             raise HTTPException(401, "API key inválida o ausente (cabecera X-API-Key)")
++        cuenta = svc.info_cuenta(u["name"])
++        u["demo"] = bool(cuenta and cuenta["plan"] == "DEMO")
++        u["cuenta"] = cuenta
++        if u["demo"]:
++            path, m = request.url.path, request.method
++            libre = path in ("/v1/me", "/v1/logout")
++            if not libre:
++                if cuenta["estado"] == "DEMO_VENCIDO":
++                    raise HTTPException(402, "Su demo terminó. Para seguir usando el sistema contacte a ventas para adquirir la versión completa.")
++                if not any(m == mm and rx.match(path) for mm, rx in DEMO_OK):
++                    raise HTTPException(403, "Esta función no está incluida en la demo. Disponible en la versión completa.")
++                if m == "POST" and path == "/v1/screen" and cuenta["estado"] == "DEMO_AGOTADO":
++                    raise HTTPException(402, "Agotó las consultas de su demo. Contacte a ventas para adquirir la versión completa.")
+         return u
+ 
+     def need(role: str):
+@@ -126,7 +171,10 @@ def create_app(service: Service | None = None) -> FastAPI:
+ 
+     @app.get("/v1/me", summary="Usuario de la sesión actual")
+     def me(u: dict = Depends(user)):
+-        return {"usuario": u["name"], "rol": u["role"]}
++        r = {"usuario": u["name"], "rol": u["role"]}
++        if u.get("cuenta"):
++            r["cuenta"] = u["cuenta"]
++        return r
+ 
+     @app.get("/v1/users", summary="Lista de usuarios (admin)")
+     def users(u: dict = Depends(need("admin"))):
+@@ -151,10 +199,63 @@ def create_app(service: Service | None = None) -> FastAPI:
+         run(svc.set_user_active, name, accion == "activar", u["name"])
+         return {"ok": True}
+ 
++    # ---- registro de prospectos (público) y panel de clientes (admin)
++    @app.get("/v1/registro/config", summary="Datos públicos del formulario de registro")
++    def registro_cfg():
++        return {"abierto": svc.s.registro_abierto, "dias": svc.s.demo_dias, "consultas": svc.s.demo_consultas,
++                "contacto": svc.s.contacto_ventas}
++
++    @app.post("/v1/registro", summary="Registro público: crea una cuenta de demo limitada")
++    def registro(b: Registro, request: Request):
++        if not svc.s.registro_abierto:
++            raise HTTPException(403, "El registro de demos está cerrado. Contacte a ventas.")
++        if b.web:  # bot
++            return {"ok": True}
++        if not b.acepta:
++            raise HTTPException(400, "Debe aceptar los términos de la demo")
++        ip, now = _ip(request), time.time()
++        q = reg_hits[ip]
++        while q and now - q[0] > 3600:
++            q.popleft()
++        if len(q) >= 5:
++            raise HTTPException(429, "Demasiados registros desde esta red; intente más tarde")
++        r = run(svc.registrar_cliente, b.model_dump(), b.contrasena, "FORMULARIO", "registro")
++        q.append(now)
++        return r
++
++    @app.get("/v1/clientes", summary="Panel de clientes y demos (admin)")
++    def clientes(estado: str | None = None, texto: str | None = None, u: dict = Depends(need("admin"))):
++        return svc.listar_clientes(estado, texto)
++
++    @app.get("/v1/clientes/resumen", summary="Totales por estado (admin)")
++    def clientes_resumen(u: dict = Depends(need("admin"))):
++        return svc.resumen_clientes()
++
++    @app.get("/v1/clientes/export.csv", summary="Exporta clientes a CSV (admin)")
++    def clientes_csv(u: dict = Depends(need("admin"))):
++        return Response(svc.clientes_csv(), media_type="text/csv; charset=utf-8",
++                        headers={"Content-Disposition": 'attachment; filename="clientes.csv"'})
++
++    @app.post("/v1/clientes", summary="Alta manual de un cliente (admin)")
++    def clientes_alta(b: AltaCliente, u: dict = Depends(need("admin"))):
++        if b.plan not in ("DEMO", "PAGADO"):
++            raise HTTPException(400, "Plan inválido")
++        return run(svc.registrar_cliente, b.model_dump(), b.contrasena, "ALTA_MANUAL", u["name"], b.plan)
++
++    @app.post("/v1/clientes/{cid}/{accion}", summary="Extender demo, activar pago, suspender… (admin)")
++    def clientes_accion(cid: int, accion: str, b: AccionCliente | None = None, u: dict = Depends(need("admin"))):
++        return run(svc.accion_cliente, cid, accion, u["name"], b.valor if b else None)
++
+     # ---- consultas
+     @app.post("/v1/screen", summary="Consulta una persona (y sus relacionados) contra todas las listas")
+     def screen(p: Persona, u: dict = Depends(need("analista"))):
+         d = p.model_dump(exclude_none=True)
++        if u.get("demo"):  # la demo no guarda sujetos ni alertas ni consulta relacionados
++            d.pop("referencia", None)
++            d.pop("relacionados", None)
++            r = run(svc.screen, d, u["name"], persist=False)
++            svc.usar_consulta(u["name"])
++            return r
+         return run(svc.screen, d, u["name"], persist=p.crear_alertas)
+ 
+     @app.post("/v1/screen/batch", summary="Consulta por lote (JSON, máx. 1000)")
+@@ -187,7 +288,7 @@ def create_app(service: Service | None = None) -> FastAPI:
+ 
+     @app.get("/v1/screenings/{sid}", summary="Resultado completo de una consulta anterior")
+     def consulta_get(sid: int, u: dict = Depends(need("analista"))):
+-        return run(svc.get_screening, sid)
++        return run(svc.get_screening, sid, u["name"] if u.get("demo") else None)
+ 
+     @app.get("/v1/entries/{entry_id}", summary="Ficha completa de un registro de lista")
+     def ficha(entry_id: int, u: dict = Depends(need("analista"))):
+@@ -195,7 +296,7 @@ def create_app(service: Service | None = None) -> FastAPI:
+ 
+     @app.get("/v1/screenings/{sid}/constancia", response_class=HTMLResponse, summary="Constancia imprimible")
+     def constancia(sid: int, u: dict = Depends(need("analista"))):
+-        return run(svc.constancia_html, sid)
++        return run(svc.constancia_html, sid, u["name"] if u.get("demo") else None, bool(u.get("demo")))
+ 
+     # ---- operaciones / expedientes (notarial / inmobiliario)
+     @app.post("/v1/operaciones", summary="Consulta todas las partes de un expediente y emite dictamen consolidado")
+diff --git a/pldscreen/clientes.py b/pldscreen/clientes.py
+new file mode 100644
+index 0000000..599611b
+--- /dev/null
++++ b/pldscreen/clientes.py
+@@ -0,0 +1,162 @@
++"""Clientes y demos: registro público, demo limitada (días y consultas), conversión a plan pagado, panel del administrador."""
++from __future__ import annotations
++
++import csv
++import io
++import re
++from datetime import datetime, timedelta, timezone
++
++from . import db as dbm
++
++EMAIL_RE = re.compile(r"^[^@\s]{1,64}@[^@\s]{1,255}\.[^@\s]{2,}$")
++TIPOS = ["NOTARIA", "INMOBILIARIA", "DESPACHO", "OTRO"]
++# Rutas (método, prefijo) que puede usar una cuenta DEMO
++DEMO_PERMITIDO = [("POST", "/v1/screen"), ("GET", "/v1/me"), ("POST", "/v1/logout"), ("GET", "/v1/lists"),
++                  ("GET", "/v1/entries/"), ("GET", "/v1/screenings/")]
++
++
++def _utc() -> datetime:
++    return datetime.now(timezone.utc)
++
++
++def _norm_user(email: str) -> str:
++    return re.sub(r"[^a-z0-9._-]", "", email.lower().split("@")[0]) or "cliente"
++
++
++class ClientesMixin:
++    # --------------------------------------------------------------- alta
++    def _unique_username(self, base: str) -> str:
++        name, i = base[:30], 1
++        while self.conn.execute("SELECT 1 FROM users WHERE name=?", (name,)).fetchone():
++            i += 1
++            name = f"{base[:26]}{i}"
++        return name
++
++    def registrar_cliente(self, d: dict, contrasena: str, origen: str = "FORMULARIO", actor: str = "registro",
++                          plan: str = "DEMO") -> dict:
++        from .service import ServiceError
++        nombre = (d.get("nombre") or "").strip()
++        org = (d.get("organizacion") or "").strip()
++        email = (d.get("email") or "").strip().lower()
++        if len(nombre) < 3 or len(org) < 2:
++            raise ServiceError("Escriba su nombre y el de su notaría, inmobiliaria u organización")
++        if not EMAIL_RE.match(email):
++            raise ServiceError("Correo electrónico no válido")
++        tipo = (d.get("tipo") or "OTRO").upper()
++        tipo = tipo if tipo in TIPOS else "OTRO"
++        self._check_password(contrasena)
++        with self.lock:
++            if self.conn.execute("SELECT 1 FROM customers WHERE email=? AND plan='DEMO'", (email,)).fetchone():
++                raise ServiceError("Ya existe una demo con ese correo. Pida al administrador ampliarla o activarla.", 409)
++        user = self._unique_username(_norm_user(email))
++        self.create_user(user, "analista", contrasena)
++        exp = (_utc() + timedelta(days=self.s.demo_dias)).isoformat(timespec="seconds") if plan == "DEMO" else None
++        with self.lock, dbm.tx(self.conn):
++            cur = self.conn.execute(
++                "INSERT INTO customers(nombre,organizacion,tipo,email,telefono,user_name,plan,demo_expira,consultas_max,"
++                "origen,notas,creado,pagado_en) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
++                (nombre[:120], org[:160], tipo, email, (d.get("telefono") or "").strip()[:30], user, plan, exp,
++                 self.s.demo_consultas if plan == "DEMO" else None, origen, (d.get("notas") or "")[:500], dbm.now(),
++                 dbm.now() if plan == "PAGADO" else None))
++            dbm.audit(self.conn, actor, "CLIENTE_REGISTRADO", {"id": cur.lastrowid, "usuario": user, "plan": plan,
++                                                               "organizacion": org, "origen": origen})
++        return {"usuario": user, "plan": plan, "demo_expira": exp, "consultas_max": self.s.demo_consultas if plan == "DEMO" else None}
++
++    # --------------------------------------------------------------- estado
++    def _estado(self, r, activo: bool) -> str:
++        if not activo:
++            return "SUSPENDIDO"
++        if r["plan"] == "PAGADO":
++            return "PAGADO"
++        if r["demo_expira"] and r["demo_expira"] <= dbm.now():
++            return "DEMO_VENCIDO"
++        if r["consultas_max"] is not None and r["consultas_usadas"] >= r["consultas_max"]:
++            return "DEMO_AGOTADO"
++        return "DEMO_ACTIVO"
++
++    def info_cuenta(self, usuario: str) -> dict | None:
++        """None = usuario interno (sin registro de cliente)."""
++        with self.lock:
++            r = self.conn.execute("SELECT c.*, u.active FROM customers c JOIN users u ON u.name=c.user_name WHERE c.user_name=?",
++                                  (usuario,)).fetchone()
++        if not r:
++            return None
++        est = self._estado(r, bool(r["active"]))
++        return {"plan": r["plan"], "estado": est, "demo_expira": r["demo_expira"], "consultas_max": r["consultas_max"],
++                "consultas_usadas": r["consultas_usadas"], "organizacion": r["organizacion"],
++                "contacto": self.s.contacto_ventas}
++
++    def usar_consulta(self, usuario: str) -> None:
++        with self.lock:
++            self.conn.execute("UPDATE customers SET consultas_usadas=consultas_usadas+1, ultimo_acceso=? WHERE user_name=?",
++                              (dbm.now(), usuario))
++
++    def listar_clientes(self, estado: str | None = None, texto: str | None = None) -> list[dict]:
++        with self.lock:
++            rows = self.conn.execute("SELECT c.*, u.active FROM customers c LEFT JOIN users u ON u.name=c.user_name "
++                                     "ORDER BY c.id DESC").fetchall()
++        out = []
++        for r in rows:
++            e = self._estado(r, bool(r["active"]))
++            if estado and e != estado.upper():
++                continue
++            blob = " ".join(str(r[k] or "") for k in ("nombre", "organizacion", "email", "telefono", "user_name")).lower()
++            if texto and texto.lower() not in blob:
++                continue
++            out.append({"id": r["id"], "nombre": r["nombre"], "organizacion": r["organizacion"], "tipo": r["tipo"],
++                        "email": r["email"], "telefono": r["telefono"], "usuario": r["user_name"], "plan": r["plan"],
++                        "estado": e, "demo_expira": r["demo_expira"], "consultas_max": r["consultas_max"],
++                        "consultas_usadas": r["consultas_usadas"], "origen": r["origen"], "notas": r["notas"],
++                        "creado": r["creado"], "pagado_en": r["pagado_en"], "ultimo_acceso": r["ultimo_acceso"]})
++        return out
++
++    def resumen_clientes(self) -> dict:
++        c = {"total": 0, "DEMO_ACTIVO": 0, "DEMO_VENCIDO": 0, "DEMO_AGOTADO": 0, "PAGADO": 0, "SUSPENDIDO": 0}
++        for x in self.listar_clientes():
++            c["total"] += 1
++            c[x["estado"]] += 1
++        return c
++
++    def clientes_csv(self) -> str:
++        buf = io.StringIO()
++        buf.write("﻿")
++        w = csv.writer(buf)
++        cols = ["id", "nombre", "organizacion", "tipo", "email", "telefono", "usuario", "plan", "estado", "demo_expira",
++                "consultas_usadas", "consultas_max", "origen", "creado", "pagado_en", "notas"]
++        w.writerow(cols)
++        for x in self.listar_clientes():
++            w.writerow([("'" + str(x[k]) if str(x[k] or "")[:1] in "=+-@" and x[k] else (x[k] if x[k] is not None else ""))
++                        for k in cols])
++        return buf.getvalue()
++
++    # --------------------------------------------------------------- acciones del administrador
++    def accion_cliente(self, cid: int, accion: str, actor: str, valor: str | None = None) -> dict:
++        from .service import ServiceError
++        with self.lock:
++            r = self.conn.execute("SELECT * FROM customers WHERE id=?", (cid,)).fetchone()
++        if not r:
++            raise ServiceError("Cliente no encontrado", 404)
++        with self.lock, dbm.tx(self.conn):
++            if accion == "extender":
++                base = max(_utc(), datetime.fromisoformat(r["demo_expira"])) if r["demo_expira"] else _utc()
++                dias = float(valor or self.s.demo_dias)
++                self.conn.execute("UPDATE customers SET demo_expira=?, consultas_max=COALESCE(consultas_max,0)+? WHERE id=?",
++                                  ((base + timedelta(days=dias)).isoformat(timespec="seconds"), self.s.demo_consultas, cid))
++            elif accion == "pagado":
++                self.conn.execute("UPDATE customers SET plan='PAGADO', demo_expira=NULL, consultas_max=NULL, pagado_en=? WHERE id=?",
++                                  (dbm.now(), cid))
++            elif accion == "demo":
++                self.conn.execute("UPDATE customers SET plan='DEMO', pagado_en=NULL, demo_expira=?, consultas_max=?, "
++                                  "consultas_usadas=0 WHERE id=?",
++                                  ((_utc() + timedelta(days=self.s.demo_dias)).isoformat(timespec="seconds"),
++                                   self.s.demo_consultas, cid))
++            elif accion == "nota":
++                self.conn.execute("UPDATE customers SET notas=? WHERE id=?", ((valor or "")[:500], cid))
++            elif accion in ("suspender", "reactivar"):
++                self.conn.execute("UPDATE users SET active=? WHERE name=?", (0 if accion == "suspender" else 1, r["user_name"]))
++                if accion == "suspender":
++                    self.conn.execute("DELETE FROM sessions WHERE name=?", (r["user_name"],))
++            else:
++                raise ServiceError("Acción no válida")
++            dbm.audit(self.conn, actor, "CLIENTE_" + accion.upper(), {"id": cid, "usuario": r["user_name"]})
++        return {"ok": True}
+diff --git a/pldscreen/config.py b/pldscreen/config.py
+index dd3946a..172c8e0 100644
+--- a/pldscreen/config.py
++++ b/pldscreen/config.py
+@@ -68,6 +68,11 @@ class Settings:
+     ext_api_key: str = field(default_factory=lambda: _env("PLD_EXT_API_KEY", ""))
+     ext_base_url: str = field(default_factory=lambda: _env("PLD_EXT_BASE_URL", ""))
+     ext_timeout: float = field(default_factory=lambda: float(_env("PLD_EXT_TIMEOUT", "20")))
++    # Demo para prospectos (registro público)
++    registro_abierto: bool = field(default_factory=lambda: _env("PLD_REGISTRO_ABIERTO", "1") == "1")
++    demo_dias: float = field(default_factory=lambda: float(_env("PLD_DEMO_DIAS", "2")))
++    demo_consultas: int = field(default_factory=lambda: int(_env("PLD_DEMO_CONSULTAS", "20")))
++    contacto_ventas: str = field(default_factory=lambda: _env("PLD_CONTACTO_VENTAS", ""))
+     country_risk_path: str = field(default_factory=lambda: _env("PLD_COUNTRY_RISK", "data/country_risk.csv"))
+ 
+     def ensure_dirs(self) -> None:
+diff --git a/pldscreen/constancia.py b/pldscreen/constancia.py
+index 5ae1b6d..34b3d88 100644
+--- a/pldscreen/constancia.py
++++ b/pldscreen/constancia.py
+@@ -117,12 +117,15 @@ def _pie(huella: str, off: float) -> str:
+             "valide con su asesor).</div>")
+ 
+ 
+-def render_consulta(folio: int, row, res: dict, settings) -> str:
++def render_consulta(folio: int, row, res: dict, settings, demo: bool = False) -> str:
+     off, org = settings.tz_offset_hours, getattr(settings, "org_name", "")
+     c = res.get("consulta", {}) or {}
+     clase, texto = _RESULT.get(res.get("resultado"), ("media", str(res.get("resultado", "")).replace("_", " ").capitalize()))
+     ms = res.get("coincidencias") or []
+     body = _enc("Constancia de consulta en listas – PLD/FT", f"Folio de consulta", f"No. {folio}", org)
++    if demo:
++        body += _banner("media", "VERSIÓN DE DEMOSTRACIÓN – sin validez para expedientes",
++                        "Cuenta de prueba con funciones limitadas. Adquiera el servicio completo para emitir constancias definitivas.")
+     body += _banner(clase, texto, f"Riesgo sugerido: {res.get('riesgo_sugerido', '—')}" +
+                     (f" · Nivel máximo de coincidencia: {res.get('nivel_maximo')}" if res.get("nivel_maximo") else ""))
+     body += "<h2>Datos de la consulta</h2>" + _kv([
+diff --git a/pldscreen/db.py b/pldscreen/db.py
+index e603c8a..a688057 100644
+--- a/pldscreen/db.py
++++ b/pldscreen/db.py
+@@ -47,6 +47,10 @@ CREATE INDEX IF NOT EXISTS ix_ops_exp ON operations(expediente);
+ CREATE TABLE IF NOT EXISTS users(
+   id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, role TEXT, key_hash TEXT UNIQUE, active INTEGER DEFAULT 1,
+   created_at TEXT);
++CREATE TABLE IF NOT EXISTS customers(
++  id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT, organizacion TEXT, tipo TEXT, email TEXT, telefono TEXT,
++  user_name TEXT UNIQUE, plan TEXT DEFAULT 'DEMO', demo_expira TEXT, consultas_max INTEGER, consultas_usadas INTEGER DEFAULT 0,
++  origen TEXT, notas TEXT, creado TEXT, pagado_en TEXT, ultimo_acceso TEXT);
+ CREATE TABLE IF NOT EXISTS operation_parties(
+   operation_id INTEGER, subject_id INTEGER, rol TEXT, PRIMARY KEY(operation_id, subject_id, rol));
+ CREATE TABLE IF NOT EXISTS audit_log(
+diff --git a/pldscreen/service.py b/pldscreen/service.py
+index 4b8281f..888ac3b 100644
+--- a/pldscreen/service.py
++++ b/pldscreen/service.py
+@@ -20,6 +20,7 @@ from .matching import Index, Match, Query, level_rank
+ from .normalize import normalize_curp, normalize_rfc
+ from . import operations as ops
+ from . import providers
++from .clientes import ClientesMixin
+ 
+ ROLES = {"analista": 1, "supervisor": 2, "admin": 3}
+ 
+@@ -46,7 +47,7 @@ def _utc() -> datetime:
+     return datetime.now(timezone.utc)
+ 
+ 
+-class Service:
++class Service(ClientesMixin):
+     def __init__(self, settings: Settings | None = None):
+         self.s = settings or get_settings()
+         self.s.ensure_dirs()
+@@ -767,10 +768,10 @@ class Service:
+                         "evidencia_sha256": r["evidence_hash"]})
+         return out
+ 
+-    def get_screening(self, sid: int) -> dict:
++    def get_screening(self, sid: int, solo_actor: str | None = None) -> dict:
+         with self.lock:
+-            r = self.conn.execute("SELECT result_json FROM screenings WHERE id=?", (sid,)).fetchone()
+-        if not r:
++            r = self.conn.execute("SELECT result_json, actor FROM screenings WHERE id=?", (sid,)).fetchone()
++        if not r or (solo_actor and r["actor"] != solo_actor):
+             raise ServiceError("Consulta no encontrada", 404)
+         return json.loads(r["result_json"])
+ 
+@@ -954,11 +955,11 @@ class Service:
+         from . import constancia
+         return constancia.render_operacion(self.get_operation(op_id), self.s)
+ 
+-    def constancia_html(self, screening_id: int) -> str:
++    def constancia_html(self, screening_id: int, solo_actor: str | None = None, demo: bool = False) -> str:
+         from . import constancia
+         with self.lock:
+             r = self.conn.execute("SELECT * FROM screenings WHERE id=?", (screening_id,)).fetchone()
+-        if not r:
++        if not r or (solo_actor and r["actor"] != solo_actor):
+             raise ServiceError("Consulta no encontrada", 404)
+-        return constancia.render_consulta(screening_id, r, json.loads(r["result_json"]), self.s)
++        return constancia.render_consulta(screening_id, r, json.loads(r["result_json"]), self.s, demo=demo)
+ 
+diff --git a/pldscreen/static/index.html b/pldscreen/static/index.html
+index 0fa0b23..e3c77cf 100644
+--- a/pldscreen/static/index.html
++++ b/pldscreen/static/index.html
+@@ -40,6 +40,9 @@ nav button.on{background:var(--ac);color:#fff;border-color:var(--ac)}
+ .bars i{display:block;background:var(--ac);border-radius:4px 4px 0 0;min-height:2px;margin-bottom:3px}.hbar{display:flex;align-items:center;gap:8px;margin:4px 0}.hbar i{display:block;height:12px;background:var(--ac);border-radius:3px}
+ a{color:var(--ac)}.warn{border:1px solid var(--nar);color:var(--nar);border-radius:8px;padding:10px 12px;margin-bottom:14px}
+ @media print{body>*:not(#modal){display:none!important}#modal{position:static;background:none;padding:0}.mhead button{display:none}.mbox{border:0}}
++#registro .card{max-width:460px}#registro input,#registro select{width:100%;margin-bottom:10px;padding:9px}#registro label.chk{display:flex;gap:8px;align-items:flex-start;color:var(--tx);font-size:13px}#registro label.chk input{width:auto;margin:3px 0 0}
++.demobar{background:#fffaeb;color:#7a4a05;border-bottom:1px solid #e9c46a;padding:8px 16px;font-size:13px}@media(prefers-color-scheme:dark){.demobar{background:#3a2e0f;color:#f2d15b;border-color:#6b5513}}
++.pill{display:inline-block;padding:1px 8px;border-radius:10px;font-size:12px;font-weight:600;border:1px solid currentColor}.p-PAGADO{color:var(--ver)}.p-DEMO_ACTIVO{color:var(--ac)}.p-DEMO_VENCIDO,.p-DEMO_AGOTADO{color:var(--nar)}.p-SUSPENDIDO{color:var(--rojo)}
+ footer{max-width:1100px;margin:0 auto;padding:6px 16px 24px;color:var(--mut);font-size:12px}
+ </style>
+ </head>
+@@ -53,9 +56,29 @@ footer{max-width:1100px;margin:0 auto;padding:6px 16px 24px;color:var(--mut);fon
+     <label for="lp">Contraseña</label><input id="lp" type="password" autocomplete="current-password">
+     <button id="lgo">Entrar</button>
+     <div class="err" id="lerr"></div>
++    <p class="mut" id="regp" style="margin:14px 0 0;text-align:center"><a href="#" id="regLink">¿No tiene cuenta? Solicite una demo gratuita</a></p>
++  </div>
++</div>
++<div id="registro" class="hide" style="min-height:100vh;display:grid;place-items:center;padding:16px">
++  <div class="card" style="width:100%">
++    <div class="brand"><div class="logo">PLD</div><div><b>PLD Soluciones</b><small>Consultas de listas negras</small></div></div>
++    <h2 style="margin:14px 0 4px;font-size:20px">Solicite su demo</h2>
++    <p class="mut" id="regtxt">Prueba gratuita con funciones y consultas limitadas.</p>
++    <label>Su nombre</label><input id="rn" autocomplete="name">
++    <label>Notaría, inmobiliaria u organización</label><input id="ro">
++    <label>Tipo</label><select id="rt"><option value="NOTARIA">Notaría</option><option value="INMOBILIARIA">Inmobiliaria</option><option value="DESPACHO">Despacho</option><option value="OTRO">Otro</option></select>
++    <label>Correo electrónico (será su usuario)</label><input id="re" type="email" autocomplete="email">
++    <label>Teléfono (opcional)</label><input id="rtel" type="tel">
++    <label>Contraseña (mín. 10 caracteres)</label><input id="rp" type="password" autocomplete="new-password">
++    <input id="rweb" tabindex="-1" autocomplete="off" style="position:absolute;left:-9999px" aria-hidden="true">
++    <label class="chk"><input type="checkbox" id="rac"><span>Entiendo que es una demo limitada: sin guardado de expedientes ni alertas, constancias con marca de agua y sin validez para operaciones reales. No debo capturar datos de clientes reales.</span></label>
++    <p style="margin-top:12px"><button id="rgo" style="width:100%;padding:11px;font-size:15px">Crear mi demo</button></p>
++    <div class="err" id="rerr"></div>
++    <p style="text-align:center;margin:8px 0 0"><a href="#" id="regBack">Ya tengo cuenta · volver a iniciar sesión</a></p>
+   </div>
+ </div>
+ <div id="app" class="hide">
++<div id="demobar" class="demobar hide"></div>
+ <header>
+   <div class="brand"><div class="logo">PLD</div><div><b>PLD Soluciones</b><small>Consultas de listas negras</small></div></div>
+   <nav style="flex:1">
+@@ -68,6 +91,7 @@ footer{max-width:1100px;margin:0 auto;padding:6px 16px 24px;color:var(--mut);fon
+     <button class="sec" data-t="listas">Listas</button>
+     <button class="sec" data-t="auditoria" data-min="2">Auditoría</button>
+     <button class="sec" data-t="usuarios" data-min="3">Usuarios</button>
++    <button class="sec" data-t="clientes" data-min="3">Clientes</button>
+   </nav>
+   <div class="who"><span id="quien"></span><button class="sec" id="salir">Salir</button></div>
+ </header>
+@@ -126,6 +150,14 @@ footer{max-width:1100px;margin:0 auto;padding:6px 16px 24px;color:var(--mut);fon
+ <section id="alertas" class="hide"><div class="card"><p><select id="st"><option value="">Todas</option><option>ABIERTA</option><option>PENDIENTE_APROBACION</option><option>CONFIRMADA</option><option>FALSO_POSITIVO</option></select> <button id="ra" class="sec">Actualizar</button></p><div id="al"></div></div></section>
+ <section id="listas" class="hide"><div class="card" id="li"></div></section>
+ <section id="auditoria" class="hide"><div class="card" id="au"></div></section>
++<section id="clientes" class="hide">
++  <div id="clt" class="tiles"></div>
++  <div class="card"><div class="grid">
++    <div><label>Estado</label><select id="cle" style="width:100%"><option value="">Todos</option><option value="DEMO_ACTIVO">Demo activa</option><option value="DEMO_VENCIDO">Demo vencida</option><option value="DEMO_AGOTADO">Consultas agotadas</option><option value="PAGADO">Pagado</option><option value="SUSPENDIDO">Suspendido</option></select></div>
++    <div><label>Buscar (nombre, organización, correo)</label><input id="clx" style="width:100%"></div></div>
++    <p><button id="clb">Buscar</button> <button class="sec" id="clcsv">Exportar a CSV</button> <button class="sec" id="clnew">Alta manual…</button> <span id="clm" class="mut"></span></p></div>
++  <div class="card" id="cll"></div>
++</section>
+ <section id="usuarios" class="hide">
+   <div class="card"><h3 style="margin-top:0">Nuevo usuario</h3>
+     <div class="grid">
+@@ -147,20 +179,30 @@ const $=id=>document.getElementById(id);
+ const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+ const TOK=()=>{try{return sessionStorage.getItem('tok')||''}catch(e){return ''}};
+ const RANK={analista:1,supervisor:2,admin:3};let ME=null;
+-function showLogin(msg){ME=null;try{sessionStorage.removeItem('tok')}catch(e){};$('app').classList.add('hide');$('login').classList.remove('hide');$('lerr').textContent=msg||'';$('lp').value='';$('lu').focus()}
+-function showApp(){$('login').classList.add('hide');$('app').classList.remove('hide');$('quien').textContent=`${ME.usuario} · ${ME.rol}`;
+- document.querySelectorAll('[data-min]').forEach(b=>b.classList.toggle('hide',RANK[ME.rol]<+b.dataset.min));openTab('consulta')}
++function showLogin(msg){ME=null;$('demobar').classList.add('hide');$('registro').classList.add('hide');try{sessionStorage.removeItem('tok')}catch(e){};$('app').classList.add('hide');$('login').classList.remove('hide');$('lerr').textContent=msg||'';$('lp').value='';$('lu').focus()}
++const fdt=iso=>{try{return new Date(iso).toLocaleString('es-MX',{dateStyle:'medium',timeStyle:'short'})}catch(e){return iso||''}};
++function demoBar(){const c=ME&&ME.cuenta,b=$('demobar');if(!c||c.plan!='DEMO'){b.classList.add('hide');return}
++ const rest=Math.max(0,(c.consultas_max||0)-(c.consultas_usadas||0));let t;
++ if(c.estado=='DEMO_VENCIDO')t='⛔ Su demo terminó. Para seguir usando el sistema adquiera la versión completa.';
++ else if(c.estado=='DEMO_AGOTADO')t='⛔ Agotó las consultas de su demo. Adquiera la versión completa para continuar.';
++ else t=`🧪 <b>Demo limitada</b> · vence ${esc(fdt(c.demo_expira))} · consultas restantes: <b>${rest}</b> de ${c.consultas_max}. Sin guardado de expedientes ni alertas; constancias sin validez. No capture datos de clientes reales.`;
++ b.innerHTML=t+(c.contacto?` · Contacto: <b>${esc(c.contacto)}</b>`:'');b.classList.remove('hide')}
++function showApp(){$('login').classList.add('hide');$('registro').classList.add('hide');$('app').classList.remove('hide');$('quien').textContent=`${ME.usuario} · ${ME.rol}`;
++ const demo=!!(ME.cuenta&&ME.cuenta.plan=='DEMO');
++ document.querySelectorAll('nav [data-t]').forEach(b=>{const t=b.dataset.t;b.classList.toggle('hide',!!((b.dataset.min&&RANK[ME.rol]<+b.dataset.min)||(demo&&!['consulta','listas'].includes(t))))});demoBar();openTab('consulta')}
+ async function api(p,o={}){const r=await fetch(p,{...o,headers:{'X-API-Key':TOK(),'Content-Type':'application/json'}});
+  const j=await r.json().catch(()=>({}));if(r.status==401&&p!='/v1/login'){showLogin('Su sesión terminó. Ingrese de nuevo.')}
++ if(r.status==402&&ME&&ME.cuenta&&p!='/v1/me'){api('/v1/me').then(m=>{ME.cuenta=m.cuenta;demoBar()}).catch(()=>{})}
++ if(r.ok&&p=='/v1/screen'&&ME&&ME.cuenta&&ME.cuenta.plan=='DEMO'){ME.cuenta.consultas_usadas++;if(ME.cuenta.consultas_usadas>=ME.cuenta.consultas_max)ME.cuenta.estado='DEMO_AGOTADO';demoBar()}
+  if(!r.ok)throw new Error(typeof j.detail=='string'?j.detail:(r.statusText||'Error'));return j}
+ async function doLogin(){$('lerr').textContent='';$('lgo').disabled=true;try{
+  const r=await api('/v1/login',{method:'POST',body:JSON.stringify({usuario:$('lu').value,contrasena:$('lp').value})});
+- try{sessionStorage.setItem('tok',r.token)}catch(e){};ME=r;showApp()}catch(e){$('lerr').textContent=e.message}$('lgo').disabled=false}
++ try{sessionStorage.setItem('tok',r.token)}catch(e){};const m=await api('/v1/me');ME={usuario:m.usuario,rol:m.rol,cuenta:m.cuenta};showApp()}catch(e){$('lerr').textContent=e.message}$('lgo').disabled=false}
+ $('lgo').onclick=doLogin;$('lp').onkeydown=e=>{if(e.key=='Enter')doLogin()};$('lu').onkeydown=e=>{if(e.key=='Enter')$('lp').focus()};
+ $('salir').onclick=async()=>{try{await api('/v1/logout',{method:'POST'})}catch(e){}showLogin('')};
+-(async()=>{if(!TOK())return showLogin();try{const m=await api('/v1/me');ME={usuario:m.usuario,rol:m.rol};showApp()}catch(e){showLogin()}})();
++(async()=>{if(!TOK())return showLogin();try{const m=await api('/v1/me');ME={usuario:m.usuario,rol:m.rol,cuenta:m.cuenta};showApp()}catch(e){showLogin()}})();
+ function openTab(t){document.querySelectorAll('main>section').forEach(x=>x.classList.add('hide'));$(t).classList.remove('hide');
+- document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('on',b.dataset.t==t));({inicio:loadIn,alertas:loadAl,historial:()=>loadHi(true),listas:loadLi,auditoria:loadAu,usuarios:loadUs})[t]?.()}
++ document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('on',b.dataset.t==t));({inicio:loadIn,alertas:loadAl,historial:()=>loadHi(true),listas:loadLi,auditoria:loadAu,usuarios:loadUs,clientes:loadCl})[t]?.()}
+ document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>openTab(b.dataset.t));
+ const badge=l=>l?`<span class="b ${esc(l)}">${esc(l)}</span>`:'';
+ const QREG=[];
+@@ -284,6 +326,21 @@ $('goe').onclick=async()=>{$('msge').textContent='Consultando…';try{
+ }catch(e){$('msge').textContent='';$('oute').innerHTML=`<div class="card" style="color:var(--rojo)">${esc(e.message)}</div>`}};
+ $('clr').onclick=()=>{['nombre','rfc','curp','dob','ref'].forEach(i=>$(i).value='');$('tipo').value='';$('out').innerHTML='';$('nombre').focus()};
+ $('nombre').onkeydown=e=>{if(e.key=='Enter')$('go').click()};
++const ESTADO={DEMO_ACTIVO:'Demo activa',DEMO_VENCIDO:'Demo vencida',DEMO_AGOTADO:'Consultas agotadas',PAGADO:'Pagado',SUSPENDIDO:'Suspendido'};
++async function loadCl(){try{const [rs,l]=await Promise.all([api('/v1/clientes/resumen'),api('/v1/clientes?estado='+encodeURIComponent($('cle').value)+'&texto='+encodeURIComponent($('clx').value))]);
++ $('clt').innerHTML=[['Clientes',rs.total],['Demos activas',rs.DEMO_ACTIVO],['Vencidas / agotadas',rs.DEMO_VENCIDO+rs.DEMO_AGOTADO],['Pagados',rs.PAGADO],['Suspendidos',rs.SUSPENDIDO]].map(x=>`<div class="tile"><b>${x[1]}</b><span>${x[0]}</span></div>`).join('');
++ $('cll').innerHTML=l.length?`<table><tr><th>Cliente</th><th>Estado</th><th>Uso</th><th>Vence</th><th>Contacto</th><th></th></tr>${l.map(x=>`<tr><td><b>${esc(x.organizacion)}</b><div class="mut">${esc(x.nombre)} · ${esc(x.tipo||'')}</div><div class="mut">usuario: ${esc(x.usuario)} · alta ${esc(fdt(x.creado))} (${esc(x.origen||'')})</div>${x.notas?`<div class="mut">📝 ${esc(x.notas)}</div>`:''}</td>
++ <td><span class="pill p-${x.estado}">${ESTADO[x.estado]||x.estado}</span></td><td>${x.plan=='DEMO'?`${x.consultas_usadas}/${x.consultas_max}`:'Sin límite'}</td><td>${x.demo_expira?esc(fdt(x.demo_expira)):'—'}</td>
++ <td>${esc(x.email)}<div class="mut">${esc(x.telefono||'')}</div></td>
++ <td>${x.plan=='DEMO'?`<button class="sec" onclick="clAct(${x.id},'extender')">Extender demo</button> <button onclick="clAct(${x.id},'pagado')">Marcar como pagado</button>`:`<button class="sec" onclick="clAct(${x.id},'demo')">Volver a demo</button>`}
++ <button class="sec" onclick="clAct(${x.id},'${x.estado=='SUSPENDIDO'?'reactivar':'suspender'}')">${x.estado=='SUSPENDIDO'?'Reactivar':'Suspender'}</button> <button class="sec" onclick="clNota(${x.id})">Nota</button></td></tr>`).join('')}</table>`:'<p class="mut">Aún no hay clientes registrados.</p>'}catch(e){$('cll').textContent=e.message}}
++async function clAct(id,a){const msg={pagado:'¿Confirma que este cliente ya pagó? Se quitarán los límites de la demo.',suspender:'¿Suspender el acceso de este cliente?',extender:'¿Extender la demo?',demo:'¿Regresar a demo limitada?'}[a];
++ if(msg&&!confirm(msg))return;try{await api(`/v1/clientes/${id}/${a}`,{method:'POST',body:'{}'});loadCl()}catch(e){alert(e.message)}}
++async function clNota(id){const n=prompt('Nota interna sobre este cliente (pago, seguimiento…):');if(n===null)return;try{await api(`/v1/clientes/${id}/nota`,{method:'POST',body:JSON.stringify({valor:n})});loadCl()}catch(e){alert(e.message)}}
++$('clb').onclick=loadCl;$('cle').onchange=loadCl;
++$('clcsv').onclick=async()=>{const h=await fetch('/v1/clientes/export.csv',{headers:{'X-API-Key':TOK()}});const a=document.createElement('a');a.href=URL.createObjectURL(await h.blob());a.download='clientes.csv';a.click()};
++$('clnew').onclick=async()=>{const o=prompt('Organización:');if(!o)return;const n=prompt('Nombre del contacto:');if(!n)return;const e=prompt('Correo (será su usuario):');if(!e)return;const p=prompt('Contraseña inicial (mín. 10 caracteres):');if(!p)return;
++ const pg=confirm('¿Ya es cliente de pago?\nAceptar = PAGADO · Cancelar = DEMO');try{await api('/v1/clientes',{method:'POST',body:JSON.stringify({nombre:n,organizacion:o,email:e,contrasena:p,plan:pg?'PAGADO':'DEMO'})});loadCl()}catch(x){alert(x.message)}};
+ async function loadUs(){try{const u=await api('/v1/users');$('ul').innerHTML=`<table><tr><th>Usuario</th><th>Rol</th><th>Estado</th><th></th><th>Entra por la página</th></tr>${u.map(x=>`<tr><td><b>${esc(x.usuario)}</b></td><td>${esc(x.rol)}</td><td>${x.activo?'<span class="ok">Activo</span>':'<span class="mut">Desactivado</span>'}</td><td><button class="sec" onclick="cambiarPw('${esc(x.usuario)}')">Cambiar contraseña</button> <button class="sec" onclick="alterna('${esc(x.usuario)}',${x.activo})">${x.activo?'Desactivar':'Activar'}</button></td><td>${x.puede_entrar_web?'Sí':'No (solo integración)'}</td></tr>`).join('')}</table>`}catch(e){$('ul').textContent=e.message}}
+ $('nuc').onclick=async()=>{$('nmsg').textContent='';try{await api('/v1/users',{method:'POST',body:JSON.stringify({usuario:$('nu').value.trim(),rol:$('nr').value,contrasena:$('np').value})});$('nu').value='';$('np').value='';$('nmsg').textContent='Usuario creado.';loadUs()}catch(e){$('nmsg').textContent=e.message}};
+ async function cambiarPw(n){const p=prompt(`Nueva contraseña para ${n} (mín. 10 caracteres):`);if(!p)return;try{await api(`/v1/users/${encodeURIComponent(n)}/password`,{method:'POST',body:JSON.stringify({contrasena:p})});alert('Contraseña actualizada.')}catch(e){alert(e.message)}}
+@@ -296,6 +353,20 @@ async function loadLi(){try{const l=await api('/v1/lists');const MODO={AUTOMATIC
+  const est=x=>x.estado=='OK'||x.estado=='CONECTADA'?`<span class="ok">${esc(x.estado)}</span>`:(x.desactualizada?`<span class="b ALTA">${esc(x.estado)}</span>`:`<span class="mut">${esc(x.estado)}</span>`);
+  $('li').innerHTML=`<table><tr><th>Fuente</th><th>Estado</th><th>Registros</th><th>Última carga</th><th>Cómo se actualiza</th><th>Autoridad</th><th>Severidad</th></tr>${l.map(x=>`<tr><td><b>${esc(x.code)}</b><div class="mut">${esc(x.name)}</div>${x.modo=='MANUAL'&&ME&&ME.rol=='admin'?`<div style="margin-top:4px"><button class="sec" data-up="${esc(x.code)}">Cargar archivo…</button> <a href="#" data-tpl="1">plantilla</a></div>`:''}</td><td>${est(x)}</td><td>${x.ultima_version?.entry_count??'—'}</td><td>${esc(x.ultima_version?.fetched_at?.slice(0,16).replace('T',' ')||'—')}</td><td>${esc(MODO[x.modo]||'')}</td><td>${esc(x.authority)}</td><td>${badge(x.severity)}</td></tr>`).join('')}</table><p class="mut">«Se actualiza sola»: el sistema las descarga cada ${'6'} horas mientras el servicio de actualización esté encendido. «Carga manual»: un administrador sube el archivo con el botón «Cargar archivo…» (CSV con columnas nombre, rfc, curp, fecha_nacimiento, tipo, pais, alias, estatus, observaciones). Cada carga reemplaza la versión anterior: el archivo debe traer la lista completa.</p><input type="file" id="upf" class="hide" accept=".csv,.txt,text/csv">`}catch(e){$('li').textContent=e.message}}
+ async function loadAu(){try{const v=await api('/v1/audit/verify');const a=await api('/v1/audit?limit=50');$('au').innerHTML=`<p>Integridad de la bitácora: <b class="${v.ok?'ok':'EXACTA'}">${v.ok?'ÍNTEGRA':'ALTERADA'}</b> (${v.registros} registros)</p><table><tr><th>#</th><th>Fecha</th><th>Usuario</th><th>Acción</th><th>Detalle</th></tr>${a.map(x=>`<tr><td>${x.seq}</td><td>${esc(x.ts.slice(0,19))}</td><td>${esc(x.actor)}</td><td>${esc(x.action)}</td><td class="mut">${esc(x.detail.slice(0,140))}</td></tr>`).join('')}</table>`}catch(e){$('au').textContent=e.message}}
++$('regLink').onclick=async e=>{e.preventDefault();try{const c=await fetch('/v1/registro/config').then(r=>r.json());
++ if(!c.abierto){$('lerr').textContent='El registro de demos está cerrado. Contacte a ventas'+(c.contacto?': '+c.contacto:'.');return}
++ $('regtxt').textContent=`Prueba gratuita de ${c.dias} días con hasta ${c.consultas} consultas. Funciones limitadas.`}catch(x){}
++ $('login').classList.add('hide');$('registro').classList.remove('hide');$('rn').focus()};
++$('regBack').onclick=e=>{e.preventDefault();$('registro').classList.add('hide');$('login').classList.remove('hide')};
++$('rgo').onclick=async()=>{$('rerr').textContent='';$('rgo').disabled=true;try{
++ if(!$('rac').checked)throw new Error('Debe aceptar las condiciones de la demo.');
++ const em=$('re').value.trim();
++ if($('rp').value.length<10)throw new Error('La contraseña debe tener al menos 10 caracteres.');
++ const rg=await api('/v1/registro',{method:'POST',body:JSON.stringify({nombre:$('rn').value,organizacion:$('ro').value,tipo:$('rt').value,email:em,telefono:$('rtel').value,contrasena:$('rp').value,acepta:true,web:$('rweb').value})});
++ const r=await api('/v1/login',{method:'POST',body:JSON.stringify({usuario:rg.usuario,contrasena:$('rp').value})}).catch(()=>null);
++ if(r){try{sessionStorage.setItem('tok',r.token)}catch(e){};const m=await api('/v1/me');ME={usuario:m.usuario,rol:m.rol,cuenta:m.cuenta};showApp()}
++ else{$('registro').classList.add('hide');$('login').classList.remove('hide');$('lerr').textContent='Demo creada. Ingrese con el usuario que se le asignó (su correo antes de la @) y su contraseña.'}
++ }catch(e){$('rerr').textContent=e.message}$('rgo').disabled=false};
+ </script>
+ </body>
+ </html>
+diff --git a/tests/test_clientes.py b/tests/test_clientes.py
+new file mode 100644
+index 0000000..baa8687
+--- /dev/null
++++ b/tests/test_clientes.py
+@@ -0,0 +1,107 @@
++"""Registro de demos, límites, aislamiento y panel de clientes."""
++import pytest
++from fastapi.testclient import TestClient
++
++from pldscreen import db as dbm
++from pldscreen.api import create_app
++from pldscreen.config import Settings
++from pldscreen.lists import loader
++from pldscreen.service import Service
++
++REG = dict(nombre="Laura Méndez", organizacion="Notaría 5 (prueba)", tipo="NOTARIA", email="laura@ejemplo.mx",
++           telefono="5555555555", contrasena="DemoClave2026!", acepta=True)
++
++
++@pytest.fixture()
++def env(tmp_path):
++    s = Settings(db_path=str(tmp_path / "t.db"), raw_dir=str(tmp_path / "raw"), inbox_dir=str(tmp_path / "in"),
++                 demo_consultas=3, demo_dias=2)
++    svc = Service(s)
++    svc.create_user("admin1", "admin", "AdminClave2026!")
++    return svc, TestClient(create_app(svc))
++
++
++def tok(c, u, p):
++    r = c.post("/v1/login", json={"usuario": u, "contrasena": p})
++    assert r.status_code == 200
++    return {"X-API-Key": r.json()["token"]}
++
++
++def test_registro_y_demo(env):
++    svc, c = env
++    r = c.post("/v1/registro", json=REG)
++    assert r.status_code == 200 and r.json()["plan"] == "DEMO"
++    h = tok(c, r.json()["usuario"], REG["contrasena"])
++    me = c.get("/v1/me", headers=h).json()
++    assert me["cuenta"]["estado"] == "DEMO_ACTIVO" and me["cuenta"]["consultas_max"] == 3
++
++
++def test_registro_valida(env):
++    _, c = env
++    assert c.post("/v1/registro", json={**REG, "acepta": False}).status_code == 400
++    assert c.post("/v1/registro", json={**REG, "email": "malo"}).status_code == 400
++    assert c.post("/v1/registro", json={**REG, "contrasena": "corta"}).status_code == 422
++    assert c.post("/v1/registro", json={**REG, "web": "http://spam"}).json() == {"ok": True}  # bot: no crea nada
++    assert c.post("/v1/registro", json=REG).status_code == 200
++    assert c.post("/v1/registro", json=REG).status_code == 409  # correo repetido
++
++
++def test_demo_limites_y_funciones(env):
++    svc, c = env
++    u = c.post("/v1/registro", json=REG).json()["usuario"]
++    h = tok(c, u, REG["contrasena"])
++    for _ in range(3):
++        assert c.post("/v1/screen", json={"nombre": "Juan Perez", "referencia": "X1"}, headers=h).status_code == 200
++    assert c.post("/v1/screen", json={"nombre": "Juan Perez"}, headers=h).status_code == 402
++    for ruta in ("/v1/screenings", "/v1/alerts", "/v1/audit", "/v1/users", "/v1/clientes", "/v1/dashboard"):
++        assert c.get(ruta, headers=h).status_code in (402, 403)
++    assert svc.conn.execute("SELECT COUNT(*) FROM subjects").fetchone()[0] == 0  # la demo no guarda sujetos
++
++
++def test_demo_vencida(env):
++    svc, c = env
++    u = c.post("/v1/registro", json=REG).json()["usuario"]
++    h = tok(c, u, REG["contrasena"])
++    svc.conn.execute("UPDATE customers SET demo_expira='2000-01-01T00:00:00+00:00'")
++    assert c.post("/v1/screen", json={"nombre": "Juan Perez"}, headers=h).status_code == 402
++    assert c.get("/v1/me", headers=h).json()["cuenta"]["estado"] == "DEMO_VENCIDO"
++
++
++def test_demo_no_ve_consultas_ajenas(env):
++    svc, c = env
++    ha = tok(c, "admin1", "AdminClave2026!")
++    sid = c.post("/v1/screen", json={"nombre": "Persona Interna"}, headers=ha).json()["id_consulta"]
++    u = c.post("/v1/registro", json=REG).json()["usuario"]
++    h = tok(c, u, REG["contrasena"])
++    assert c.get(f"/v1/screenings/{sid}", headers=h).status_code == 404
++    assert c.get(f"/v1/screenings/{sid}/constancia", headers=h).status_code == 404
++    mio = c.post("/v1/screen", json={"nombre": "Otra Persona"}, headers=h).json()["id_consulta"]
++    r = c.get(f"/v1/screenings/{mio}/constancia", headers=h)
++    assert r.status_code == 200 and "VERSIÓN DE DEMOSTRACIÓN" in r.text
++
++
++def test_panel_admin(env):
++    svc, c = env
++    c.post("/v1/registro", json=REG)
++    ha = tok(c, "admin1", "AdminClave2026!")
++    lst = c.get("/v1/clientes", headers=ha).json()
++    assert len(lst) == 1 and lst[0]["estado"] == "DEMO_ACTIVO"
++    cid = lst[0]["id"]
++    assert c.get("/v1/clientes/resumen", headers=ha).json()["DEMO_ACTIVO"] == 1
++    assert c.post(f"/v1/clientes/{cid}/extender", headers=ha).status_code == 200
++    assert c.post(f"/v1/clientes/{cid}/suspender", headers=ha).status_code == 200
++    assert c.get("/v1/clientes?estado=SUSPENDIDO", headers=ha).json()[0]["id"] == cid
++    assert c.post("/v1/login", json={"usuario": lst[0]["usuario"], "contrasena": REG["contrasena"]}).status_code == 401
++    c.post(f"/v1/clientes/{cid}/reactivar", headers=ha)
++    assert c.post(f"/v1/clientes/{cid}/pagado", headers=ha).status_code == 200
++    assert c.get("/v1/clientes", headers=ha).json()[0]["estado"] == "PAGADO"
++    hc = tok(c, lst[0]["usuario"], REG["contrasena"])
++    assert c.get("/v1/screenings", headers=hc).status_code == 200  # ya sin restricciones de demo
++    assert "laura@ejemplo.mx" in c.get("/v1/clientes/export.csv", headers=ha).text
++    assert c.get("/v1/clientes", headers=hc).status_code == 403  # no es admin
++
++
++def test_registro_cerrado(env, tmp_path):
++    svc, c = env
++    svc.s.registro_abierto = False
++    assert c.post("/v1/registro", json=REG).status_code == 403

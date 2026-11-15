@@ -68,6 +68,11 @@ class Settings:
     ext_api_key: str = field(default_factory=lambda: _env("PLD_EXT_API_KEY", ""))
     ext_base_url: str = field(default_factory=lambda: _env("PLD_EXT_BASE_URL", ""))
     ext_timeout: float = field(default_factory=lambda: float(_env("PLD_EXT_TIMEOUT", "20")))
+    # Demo para prospectos (registro público)
+    registro_abierto: bool = field(default_factory=lambda: _env("PLD_REGISTRO_ABIERTO", "1") == "1")
+    demo_dias: float = field(default_factory=lambda: float(_env("PLD_DEMO_DIAS", "2")))
+    demo_consultas: int = field(default_factory=lambda: int(_env("PLD_DEMO_CONSULTAS", "20")))
+    contacto_ventas: str = field(default_factory=lambda: _env("PLD_CONTACTO_VENTAS", ""))
     country_risk_path: str = field(default_factory=lambda: _env("PLD_COUNTRY_RISK", "data/country_risk.csv"))
 
     def ensure_dirs(self) -> None:
