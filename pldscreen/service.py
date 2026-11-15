@@ -951,60 +951,14 @@ class Service:
         return d
 
     def operation_constancia_html(self, op_id: int) -> str:
-        d = self.get_operation(op_id)
-        e = html.escape
-        rows = ""
-        for p in d["partes"]:
-            rows += (f"<tr><td>{e(str(p['rol'] or ''))}</td><td>{e(p['nombre'])}</td><td>{e(p['resultado'])}</td>"
-                     f"<td>{e(str(p['nivel_maximo'] or '—'))}</td><td>#{p['id_consulta']}</td></tr>")
-            for x in p["relacionados"]:
-                rows += (f"<tr><td>↳ {e(str(x['rol'] or ''))}</td><td>{e(x['nombre'])}</td><td>{e(x['resultado'])}</td>"
-                         f"<td>{e(str(x['nivel_maximo'] or '—'))}</td><td>#{x['id_consulta']}</td></tr>")
-        hall = "".join(f"<li><b>{e(h['parte'])}</b> ({e(str(h['rol']))}) – nivel {e(str(h['nivel']))}, listas: "
-                       f"{e(', '.join(h['listas']))}; alertas: {e(', '.join(map(str, h['alertas'])) or 'ya abiertas')}</li>"
-                       for h in d["hallazgos"]) or "<li>Sin hallazgos</li>"
-        adv = "".join(f"<li>{e(a)}</li>" for a in d.get("advertencias", [])) or "<li>Ninguna</li>"
-        listas = "".join(f"<li>{e(k)}: versión {v['version']} ({e(str(v['fecha_carga']))}, {v['registros']} registros)</li>"
-                         for k, v in d["listas_consultadas"].items())
-        return f"""<!doctype html><html lang="es"><meta charset="utf-8"><title>Constancia expediente {e(d['expediente'])}</title>
-<style>body{{font:14px system-ui;max-width:900px;margin:2rem auto;padding:0 1rem}}table{{border-collapse:collapse;width:100%}}
-td,th{{border:1px solid #bbb;padding:6px;text-align:left}}th{{background:#eee}}.k{{color:#555}}</style>
-<h1>Constancia de consulta de listas – Expediente {e(d['expediente'])}</h1>
-<p><b>Folio de operación:</b> {d['id_operacion']} · <b>Acto:</b> {e(str(d['tipo_acto'] or '—'))} · <b>Fecha (UTC):</b> {e(d['fecha'])}
- · <b>Personas consultadas:</b> {d['personas_consultadas']}</p>
-<h2>Dictamen: {e(d['dictamen'])}</h2>
-<table><tr><th>Rol</th><th>Persona</th><th>Resultado</th><th>Nivel</th><th>Consulta</th></tr>{rows}</table>
-<p><b>Estado actual (considera la revisión de alertas):</b> {e(d['estado_actual']['estado'])}</p>
-<h3>Hallazgos</h3><ul>{hall}</ul>
-<h3>Advertencias para el expediente</h3><ul>{adv}</ul>
-<h3>Versiones de listas utilizadas</h3><ul>{listas}</ul>
-<p class="k">Huella SHA-256: {e(d['evidencia_sha256'])}<br>
-Agregue esta constancia al expediente/protocolo. La consulta de listas es un apoyo: la decisión final corresponde al
-titular de la notaría o al Oficial de Cumplimiento. Conserve por el plazo legal (10 años según la reforma de 2025).</p>
-<div style="margin-top:50px;display:flex;gap:60px"><div style="border-top:1px solid #000;width:260px;text-align:center">Elaboró</div>
-<div style="border-top:1px solid #000;width:260px;text-align:center">Encargado de cumplimiento</div></div></html>"""
+        from . import constancia
+        return constancia.render_operacion(self.get_operation(op_id), self.s)
 
     def constancia_html(self, screening_id: int) -> str:
+        from . import constancia
         with self.lock:
             r = self.conn.execute("SELECT * FROM screenings WHERE id=?", (screening_id,)).fetchone()
         if not r:
             raise ServiceError("Consulta no encontrada", 404)
-        res = json.loads(r["result_json"])
-        e = html.escape
-        rows = "".join(
-            f"<tr><td>{e(m['fuente'])}</td><td>{e(str(m['nombre_coincidente']))}</td><td>{m['puntaje']}</td>"
-            f"<td>{e(m['nivel'])}</td><td>{e('; '.join(m['razones']))}</td></tr>" for m in res.get("coincidencias", []))
-        listas = "".join(f"<li>{e(k)}: versión {v['version']} ({e(str(v['fecha_carga']))}, {v['registros']} registros)</li>"
-                         for k, v in (res.get("listas_consultadas") or {}).items())
-        c = res.get("consulta", {})
-        return f"""<!doctype html><html lang="es"><meta charset="utf-8"><title>Constancia de consulta #{screening_id}</title>
-<style>body{{font:14px system-ui;max-width:900px;margin:2rem auto;padding:0 1rem}}table{{border-collapse:collapse;width:100%}}
-td,th{{border:1px solid #bbb;padding:6px;text-align:left}}th{{background:#eee}}.k{{color:#555}}</style>
-<h1>Constancia de consulta en listas – PLD/FT</h1>
-<p><b>Folio:</b> {screening_id} · <b>Fecha (UTC):</b> {e(r['created_at'])} · <b>Tipo:</b> {e(r['kind'])} · <b>Usuario:</b> {e(r['actor'])}</p>
-<h3>Datos consultados</h3><p>{e(json.dumps(c, ensure_ascii=False))}</p>
-<h3>Resultado: {e(res.get('resultado', ''))}</h3>
-<table><tr><th>Lista</th><th>Nombre coincidente</th><th>Puntaje</th><th>Nivel</th><th>Razones</th></tr>{rows or '<tr><td colspan=5>Sin coincidencias</td></tr>'}</table>
-<h3>Versiones de listas utilizadas</h3><ul>{listas}</ul>
-<p class="k">Huella SHA-256 de la evidencia: {e(r['evidence_hash'] or '')}<br>
-Conserve esta constancia en el expediente del cliente por el plazo legal aplicable (10 años según la reforma a la LFPIORPI de 2025).</p></html>"""
+        return constancia.render_consulta(screening_id, r, json.loads(r["result_json"]), self.s)
+

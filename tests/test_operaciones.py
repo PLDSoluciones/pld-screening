@@ -56,8 +56,10 @@ def test_pais_de_alto_riesgo_y_pep(svc):
 
 def test_constancia_operacion(svc):
     svc.screen_operation(OP, "ana")
-    h = svc.operation_constancia_html(svc.screen_operation(OP, "ana")["id_operacion"])
-    assert "ESC-2026-0457" in h and "Advertencias" in h and "BENEFICIARIO_CONTROLADOR" in h and "LPB_UIF" in h
+    r = svc.screen_operation(OP, "ana")
+    h = svc.operation_constancia_html(r["id_operacion"])
+    assert "ESC-2026-0457" in h and "BENEFICIARIO_CONTROLADOR" in h and "LPB_UIF" in h
+    assert ("Advertencias" in h) == bool(r["advertencias"])     # la sección solo aparece si hay advertencias
 
 
 def test_validaciones(svc):
