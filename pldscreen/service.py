@@ -672,6 +672,124 @@ class Service:
                                                                      "alertas": created})
         return {"sujetos": len(subs), "alertas_nuevas": n_alerts}
 
+    # ------------------------------------------------------------------ ficha, historial
+    _OFICIAL = {
+        "OFAC_SDN": ("Buscador oficial de OFAC", "https://sanctionssearch.ofac.treas.gov/"),
+        "ONU_CSNU": ("Lista consolidada del Consejo de Seguridad (ONU)", "https://scsanctions.un.org/search/"),
+        "SAT_69B": ("Datos abiertos del SAT (Art. 69-B)", "https://www.sat.gob.mx/minisitio/DatosAbiertos/contribuyentes_publicados.html"),
+        "SAT_69B_BIS": ("Datos abiertos del SAT (Art. 69-B Bis)", "https://www.sat.gob.mx/minisitio/DatosAbiertos/contribuyentes_publicados.html"),
+        "SAT_49BIS": ("Diario Oficial de la Federación", "https://www.dof.gob.mx/"),
+    }
+
+    def entry_detail(self, entry_id: int) -> dict:
+        """Ficha completa de un registro de lista: datos, alias, fuente, versión y otras apariciones del mismo RFC/CURP."""
+        with self.lock:
+            self.index()
+            e = self.conn.execute("SELECT * FROM entries WHERE id=?", (entry_id,)).fetchone()
+            if not e:
+                raise ServiceError("Registro no encontrado", 404)
+            names = [dict(n) for n in self.conn.execute(
+                "SELECT name, kind FROM names WHERE entry_id=? ORDER BY (kind='primary') DESC, id", (entry_id,))]
+            ver = self.conn.execute("SELECT id, fetched_at, filename, entry_count, sha256 FROM list_versions WHERE id=?",
+                                    (e["version_id"],)).fetchone()
+            otras = []
+            for col in ("rfc", "curp"):
+                if e[col]:
+                    for o in self.conn.execute(
+                            f"SELECT id, source_code, primary_name, status FROM entries WHERE {col}=? AND id<>? AND active=1",
+                            (e[col], entry_id)):
+                        if all(o["id"] != x["entry_id"] for x in otras):
+                            otras.append({"entry_id": o["id"], "fuente": o["source_code"], "nombre": o["primary_name"],
+                                          "estatus": o["status"], "coincide_por": col.upper()})
+            src = dict(self._sources.get(e["source_code"], {}))
+        try:
+            dobs = json.loads(e["dobs"] or "[]")
+        except ValueError:
+            dobs = []
+        oficial = self._OFICIAL.get(e["source_code"])
+        return {
+            "entry_id": e["id"], "fuente": e["source_code"], "id_externo": e["external_id"], "activo": bool(e["active"]),
+            "tipo": e["entity_type"], "nombre": e["primary_name"], "nombres": names, "rfc": e["rfc"], "curp": e["curp"],
+            "fechas_nacimiento": dobs, "pais": e["country"], "programa": e["program"], "estatus": e["status"],
+            "observaciones": e["remarks"],
+            "fuente_detalle": {k: src.get(k) for k in ("name", "authority", "severity", "legal_basis", "action")},
+            "version_lista": dict(ver) if ver else None,
+            "verificar_en": {"nombre": oficial[0], "url": oficial[1]} if oficial else None,
+            "otras_apariciones": otras,
+        }
+
+    def screening_history(self, texto: str | None = None, nivel: str | None = None, fuente: str | None = None,
+                          desde: str | None = None, hasta: str | None = None, tipo: str | None = None,
+                          limit: int = 100, offset: int = 0) -> list[dict]:
+        sql = ("SELECT s.id, s.kind, s.actor, s.created_at, s.query_json, s.result_json, s.max_level, s.evidence_hash "
+               "FROM screenings s WHERE 1=1")
+        p: list = []
+        if nivel and nivel.upper() == "NINGUNA":
+            sql += " AND s.max_level IS NULL"
+        elif nivel:
+            sql += " AND s.max_level=?"; p.append(nivel.upper())
+        if tipo:
+            sql += " AND s.kind=?"; p.append(tipo.upper())
+        off = timedelta(hours=self.s.tz_offset_hours)
+
+        def _utc_de(fecha: str, fin: bool) -> str:  # «AAAA-MM-DD» en hora local -> instante UTC
+            try:
+                d = datetime.strptime(fecha[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc) - off
+            except ValueError:
+                raise ServiceError("Fecha inválida; use AAAA-MM-DD", 422)
+            return (d + (timedelta(days=1) if fin else timedelta())).isoformat(timespec="seconds")
+        if desde:
+            sql += " AND s.created_at>=?"; p.append(_utc_de(desde, False))
+        if hasta:
+            sql += " AND s.created_at<?"; p.append(_utc_de(hasta, True))
+        if texto:
+            sql += " AND s.query_json LIKE ? ESCAPE '\\'"
+            p.append("%" + texto.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%")
+        if fuente:
+            sql += " AND s.result_json LIKE ?"; p.append(f'%"fuente":"{fuente.upper()}"%')
+        sql += " ORDER BY s.id DESC LIMIT ? OFFSET ?"
+        p += [max(1, min(limit, 1000)), max(0, offset)]
+        with self.lock:
+            rows = self.conn.execute(sql, p).fetchall()
+        out = []
+        for r in rows:
+            q = json.loads(r["query_json"] or "{}")
+            try:
+                res = json.loads(r["result_json"] or "{}")
+            except ValueError:
+                res = {}
+            out.append({"id": r["id"], "fecha": r["created_at"], "tipo": r["kind"], "usuario": r["actor"],
+                        "nombre": q.get("nombre") or q.get("ref"), "rfc": q.get("rfc"), "curp": q.get("curp"),
+                        "referencia": q.get("referencia") or q.get("ref"), "expediente": q.get("expediente"),
+                        "nivel_maximo": r["max_level"], "resultado": res.get("resultado"),
+                        "coincidencias": len(res.get("coincidencias") or []),
+                        "fuentes": sorted({m.get("fuente") for m in res.get("coincidencias") or []}),
+                        "evidencia_sha256": r["evidence_hash"]})
+        return out
+
+    def get_screening(self, sid: int) -> dict:
+        with self.lock:
+            r = self.conn.execute("SELECT result_json FROM screenings WHERE id=?", (sid,)).fetchone()
+        if not r:
+            raise ServiceError("Consulta no encontrada", 404)
+        return json.loads(r["result_json"])
+
+    def history_csv(self, **filtros) -> str:
+        import csv
+        import io
+        filtros["limit"] = 1000
+        rows = self.screening_history(**filtros)
+        buf = io.StringIO()
+        cols = ["id", "fecha", "tipo", "usuario", "nombre", "rfc", "curp", "referencia", "expediente",
+                "nivel_maximo", "resultado", "coincidencias", "fuentes", "evidencia_sha256"]
+        w = csv.writer(buf)
+        w.writerow(cols)
+        for r in rows:
+            # evita inyección de fórmulas al abrir en Excel
+            w.writerow([("'" + str(v)) if isinstance(v, str) and v[:1] in "=+-@" else
+                        (";".join(v) if isinstance(v, list) else ("" if v is None else v)) for v in (r[c] for c in cols)])
+        return "\ufeff" + buf.getvalue()
+
     # ------------------------------------------------------------------ reportes
     def dashboard(self) -> dict:
         with self.lock:
@@ -688,7 +806,32 @@ class Service:
                 "falsos_positivos": c("SELECT COUNT(*) FROM alerts WHERE status='FALSO_POSITIVO'"),
                 "registros_en_listas": c("SELECT COUNT(*) FROM entries WHERE active=1"),
                 "bitacora": dbm.verify_audit(self.conn),
+                "consultas_hoy": c("SELECT COUNT(*) FROM screenings WHERE created_at>=? AND created_at<?", *self._dia_local(0)[:2]),
+                "consultas_7_dias": self._consultas_por_dia(7),
+                "alertas_por_fuente": {r[0]: r[1] for r in self.conn.execute(
+                    "SELECT source_code, COUNT(*) FROM alerts GROUP BY source_code ORDER BY 2 DESC")},
+                "alertas_por_estado": {r[0]: r[1] for r in self.conn.execute(
+                    "SELECT status, COUNT(*) FROM alerts GROUP BY status")},
+                "sujetos_por_riesgo": {r[0]: r[1] for r in self.conn.execute(
+                    "SELECT risk_level, COUNT(*) FROM subjects GROUP BY risk_level")},
+                "listas_desactualizadas": [x["code"] for x in self.lists_status() if x.get("desactualizada")],
             }
+
+    def _dia_local(self, atras: int = 0) -> tuple[str, str, str]:
+        """Inicio y fin (en UTC) y etiqueta del día local (zona horaria configurable, por defecto México -6)."""
+        off = timedelta(hours=self.s.tz_offset_hours)
+        d = (_utc() + off).date() - timedelta(days=atras)
+        ini = datetime(d.year, d.month, d.day, tzinfo=timezone.utc) - off
+        return ini.isoformat(timespec="seconds"), (ini + timedelta(days=1)).isoformat(timespec="seconds"), d.isoformat()
+
+    def _consultas_por_dia(self, dias: int) -> list[dict]:
+        out = []
+        for i in range(dias - 1, -1, -1):
+            ini, fin, etiqueta = self._dia_local(i)
+            n = self.conn.execute("SELECT COUNT(*) FROM screenings WHERE created_at>=? AND created_at<?",
+                                  (ini, fin)).fetchone()[0]
+            out.append({"fecha": etiqueta, "consultas": n})
+        return out
 
     def backup(self, directory: str, keep: int = 30) -> str:
         """Copia consistente de la base (API de respaldo de SQLite) con rotación."""

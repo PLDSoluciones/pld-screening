@@ -1,0 +1,546 @@
+diff -ruN -x __pycache__ new3/pld-screening/.github/workflows/ci.yml new4/pld-screening/.github/workflows/ci.yml
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -8,5 +8,5 @@
+       - uses: actions/setup-python@v5
+         with: { python-version: "3.12" }
+       - run: pip install -r requirements.txt
+-      - run: pytest -q tests/test_matching.py tests/test_parsers.py tests/test_workflow.py tests/test_operaciones.py tests/test_proveedores.py tests/test_login.py tests/test_49bis.py
++      - run: pytest -q tests/test_matching.py tests/test_parsers.py tests/test_workflow.py tests/test_operaciones.py tests/test_proveedores.py tests/test_login.py tests/test_49bis.py tests/test_ficha_historial.py
+       - run: python tools/benchmark.py 20000
+diff -ruN -x __pycache__ new3/pld-screening/docs/GUIA_PRUEBA_REAL.md new4/pld-screening/docs/GUIA_PRUEBA_REAL.md
+--- a/docs/GUIA_PRUEBA_REAL.md
++++ b/docs/GUIA_PRUEBA_REAL.md
+@@ -101,6 +101,17 @@
+ - **Manuales:** LPB, PEP, SAT 49 Bis e INTERNA. Basta dejar el archivo en `data/inbox/<FUENTE>/`; el sistema lo detecta en la siguiente ronda automática (o al ejecutar `process-inbox`).
+ - En un Codespace la actualización se detiene cuando este se suspende; por eso la operación real debe ir en un servidor.
+ 
++## 5 ter. Funciones de la página (v1.7)
++
++| Pestaña | Para qué sirve |
++|---|---|
++| **Inicio** | Tablero: consultas de hoy y de los últimos 7 días, alertas abiertas/vencidas/por lista, personas en monitoreo, aviso si alguna lista automática está atrasada y estado de la bitácora |
++| **Consulta** | Una persona. En cada coincidencia, **«Ver ficha completa y comparar»**: compara su captura (RFC, CURP, fecha de nacimiento, país) contra el registro con ✔/≈/✗, muestra todos los alias, la fuente, su fundamento legal, qué hacer, la versión de la lista y un enlace para **verificar en el sitio oficial**. Se puede imprimir |
++| **Lote** | Pegue o suba un CSV (hasta 1,000 filas; plantilla descargable). Muestra el semáforo de cada fila, abre el detalle y exporta los resultados a CSV |
++| **Historial** | Todas las consultas con filtros (texto, resultado, tipo, fechas), detalle y constancia de cada una. **Exportar a CSV** solo para supervisores y administradores |
++
++Las fechas y «hoy» se calculan con hora de la Ciudad de México (`PLD_TZ_OFFSET_H=-6`; cámbielo si opera en otra zona).
++
+ ## 6. Pruebas manuales (30 min)
+ 
+ 1. Cree su usuario: `python -m pldscreen create-user director admin` (pide una contraseña de 10+ caracteres). Luego `python -m pldscreen serve --port 8000` → abrir el puerto 8000 → entre con `director` y su contraseña. (La clave de `data/clave_admin.txt` ya no se pega en la página; sirve solo para integraciones.)
+diff -ruN -x __pycache__ new3/pld-screening/pldscreen/api.py new4/pld-screening/pldscreen/api.py
+--- a/pldscreen/api.py
++++ b/pldscreen/api.py
+@@ -8,7 +8,7 @@
+ from collections import defaultdict, deque
+ 
+ from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile
+-from fastapi.responses import FileResponse, HTMLResponse
++from fastapi.responses import FileResponse, HTMLResponse, Response
+ from pydantic import BaseModel, Field
+ 
+ from .service import ROLES, Service, ServiceError
+@@ -171,6 +171,28 @@
+                 out.append({"referencia": p.referencia, "error": str(e)})
+         return out
+ 
++    @app.get("/v1/screenings", summary="Historial de consultas con filtros")
++    def historial(texto: str | None = None, nivel: str | None = None, fuente: str | None = None,
++                  desde: str | None = None, hasta: str | None = None, tipo: str | None = None,
++                  limit: int = 100, offset: int = 0, u: dict = Depends(need("analista"))):
++        return svc.screening_history(texto, nivel, fuente, desde, hasta, tipo, limit, offset)
++
++    @app.get("/v1/screenings/export.csv", summary="Exporta el historial filtrado a CSV (supervisor)")
++    def historial_csv(texto: str | None = None, nivel: str | None = None, fuente: str | None = None,
++                      desde: str | None = None, hasta: str | None = None, tipo: str | None = None,
++                      u: dict = Depends(need("supervisor"))):
++        return Response(svc.history_csv(texto=texto, nivel=nivel, fuente=fuente, desde=desde, hasta=hasta, tipo=tipo),
++                        media_type="text/csv; charset=utf-8",
++                        headers={"Content-Disposition": 'attachment; filename="historial_consultas.csv"'})
++
++    @app.get("/v1/screenings/{sid}", summary="Resultado completo de una consulta anterior")
++    def consulta_get(sid: int, u: dict = Depends(need("analista"))):
++        return run(svc.get_screening, sid)
++
++    @app.get("/v1/entries/{entry_id}", summary="Ficha completa de un registro de lista")
++    def ficha(entry_id: int, u: dict = Depends(need("analista"))):
++        return run(svc.entry_detail, entry_id)
++
+     @app.get("/v1/screenings/{sid}/constancia", response_class=HTMLResponse, summary="Constancia imprimible")
+     def constancia(sid: int, u: dict = Depends(need("analista"))):
+         return run(svc.constancia_html, sid)
+diff -ruN -x __pycache__ new3/pld-screening/pldscreen/config.py new4/pld-screening/pldscreen/config.py
+--- a/pldscreen/config.py
++++ b/pldscreen/config.py
+@@ -44,6 +44,7 @@
+     sla_revision_hours: int = field(default_factory=lambda: int(_env("PLD_SLA_REVISION_H", "72")))
+ 
+     # Actualización automática
++    tz_offset_hours: float = field(default_factory=lambda: float(_env("PLD_TZ_OFFSET_H", "-6")))  # CDMX = -6 (sin horario de verano)
+     update_interval_hours: float = field(default_factory=lambda: float(_env("PLD_UPDATE_EVERY_H", "6")))
+     min_shrink_ratio: float = field(default_factory=lambda: float(_env("PLD_MIN_SHRINK_RATIO", "0.5")))
+ 
+diff -ruN -x __pycache__ new3/pld-screening/pldscreen/service.py new4/pld-screening/pldscreen/service.py
+--- a/pldscreen/service.py
++++ b/pldscreen/service.py
+@@ -672,6 +672,124 @@
+                                                                      "alertas": created})
+         return {"sujetos": len(subs), "alertas_nuevas": n_alerts}
+ 
++    # ------------------------------------------------------------------ ficha, historial
++    _OFICIAL = {
++        "OFAC_SDN": ("Buscador oficial de OFAC", "https://sanctionssearch.ofac.treas.gov/"),
++        "ONU_CSNU": ("Lista consolidada del Consejo de Seguridad (ONU)", "https://scsanctions.un.org/search/"),
++        "SAT_69B": ("Datos abiertos del SAT (Art. 69-B)", "https://www.sat.gob.mx/minisitio/DatosAbiertos/contribuyentes_publicados.html"),
++        "SAT_69B_BIS": ("Datos abiertos del SAT (Art. 69-B Bis)", "https://www.sat.gob.mx/minisitio/DatosAbiertos/contribuyentes_publicados.html"),
++        "SAT_49BIS": ("Diario Oficial de la Federación", "https://www.dof.gob.mx/"),
++    }
++
++    def entry_detail(self, entry_id: int) -> dict:
++        """Ficha completa de un registro de lista: datos, alias, fuente, versión y otras apariciones del mismo RFC/CURP."""
++        with self.lock:
++            self.index()
++            e = self.conn.execute("SELECT * FROM entries WHERE id=?", (entry_id,)).fetchone()
++            if not e:
++                raise ServiceError("Registro no encontrado", 404)
++            names = [dict(n) for n in self.conn.execute(
++                "SELECT name, kind FROM names WHERE entry_id=? ORDER BY (kind='primary') DESC, id", (entry_id,))]
++            ver = self.conn.execute("SELECT id, fetched_at, filename, entry_count, sha256 FROM list_versions WHERE id=?",
++                                    (e["version_id"],)).fetchone()
++            otras = []
++            for col in ("rfc", "curp"):
++                if e[col]:
++                    for o in self.conn.execute(
++                            f"SELECT id, source_code, primary_name, status FROM entries WHERE {col}=? AND id<>? AND active=1",
++                            (e[col], entry_id)):
++                        if all(o["id"] != x["entry_id"] for x in otras):
++                            otras.append({"entry_id": o["id"], "fuente": o["source_code"], "nombre": o["primary_name"],
++                                          "estatus": o["status"], "coincide_por": col.upper()})
++            src = dict(self._sources.get(e["source_code"], {}))
++        try:
++            dobs = json.loads(e["dobs"] or "[]")
++        except ValueError:
++            dobs = []
++        oficial = self._OFICIAL.get(e["source_code"])
++        return {
++            "entry_id": e["id"], "fuente": e["source_code"], "id_externo": e["external_id"], "activo": bool(e["active"]),
++            "tipo": e["entity_type"], "nombre": e["primary_name"], "nombres": names, "rfc": e["rfc"], "curp": e["curp"],
++            "fechas_nacimiento": dobs, "pais": e["country"], "programa": e["program"], "estatus": e["status"],
++            "observaciones": e["remarks"],
++            "fuente_detalle": {k: src.get(k) for k in ("name", "authority", "severity", "legal_basis", "action")},
++            "version_lista": dict(ver) if ver else None,
++            "verificar_en": {"nombre": oficial[0], "url": oficial[1]} if oficial else None,
++            "otras_apariciones": otras,
++        }
++
++    def screening_history(self, texto: str | None = None, nivel: str | None = None, fuente: str | None = None,
++                          desde: str | None = None, hasta: str | None = None, tipo: str | None = None,
++                          limit: int = 100, offset: int = 0) -> list[dict]:
++        sql = ("SELECT s.id, s.kind, s.actor, s.created_at, s.query_json, s.result_json, s.max_level, s.evidence_hash "
++               "FROM screenings s WHERE 1=1")
++        p: list = []
++        if nivel and nivel.upper() == "NINGUNA":
++            sql += " AND s.max_level IS NULL"
++        elif nivel:
++            sql += " AND s.max_level=?"; p.append(nivel.upper())
++        if tipo:
++            sql += " AND s.kind=?"; p.append(tipo.upper())
++        off = timedelta(hours=self.s.tz_offset_hours)
++
++        def _utc_de(fecha: str, fin: bool) -> str:  # «AAAA-MM-DD» en hora local -> instante UTC
++            try:
++                d = datetime.strptime(fecha[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc) - off
++            except ValueError:
++                raise ServiceError("Fecha inválida; use AAAA-MM-DD", 422)
++            return (d + (timedelta(days=1) if fin else timedelta())).isoformat(timespec="seconds")
++        if desde:
++            sql += " AND s.created_at>=?"; p.append(_utc_de(desde, False))
++        if hasta:
++            sql += " AND s.created_at<?"; p.append(_utc_de(hasta, True))
++        if texto:
++            sql += " AND s.query_json LIKE ? ESCAPE '\\'"
++            p.append("%" + texto.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%")
++        if fuente:
++            sql += " AND s.result_json LIKE ?"; p.append(f'%"fuente":"{fuente.upper()}"%')
++        sql += " ORDER BY s.id DESC LIMIT ? OFFSET ?"
++        p += [max(1, min(limit, 1000)), max(0, offset)]
++        with self.lock:
++            rows = self.conn.execute(sql, p).fetchall()
++        out = []
++        for r in rows:
++            q = json.loads(r["query_json"] or "{}")
++            try:
++                res = json.loads(r["result_json"] or "{}")
++            except ValueError:
++                res = {}
++            out.append({"id": r["id"], "fecha": r["created_at"], "tipo": r["kind"], "usuario": r["actor"],
++                        "nombre": q.get("nombre") or q.get("ref"), "rfc": q.get("rfc"), "curp": q.get("curp"),
++                        "referencia": q.get("referencia") or q.get("ref"), "expediente": q.get("expediente"),
++                        "nivel_maximo": r["max_level"], "resultado": res.get("resultado"),
++                        "coincidencias": len(res.get("coincidencias") or []),
++                        "fuentes": sorted({m.get("fuente") for m in res.get("coincidencias") or []}),
++                        "evidencia_sha256": r["evidence_hash"]})
++        return out
++
++    def get_screening(self, sid: int) -> dict:
++        with self.lock:
++            r = self.conn.execute("SELECT result_json FROM screenings WHERE id=?", (sid,)).fetchone()
++        if not r:
++            raise ServiceError("Consulta no encontrada", 404)
++        return json.loads(r["result_json"])
++
++    def history_csv(self, **filtros) -> str:
++        import csv
++        import io
++        filtros["limit"] = 1000
++        rows = self.screening_history(**filtros)
++        buf = io.StringIO()
++        cols = ["id", "fecha", "tipo", "usuario", "nombre", "rfc", "curp", "referencia", "expediente",
++                "nivel_maximo", "resultado", "coincidencias", "fuentes", "evidencia_sha256"]
++        w = csv.writer(buf)
++        w.writerow(cols)
++        for r in rows:
++            # evita inyección de fórmulas al abrir en Excel
++            w.writerow([("'" + str(v)) if isinstance(v, str) and v[:1] in "=+-@" else
++                        (";".join(v) if isinstance(v, list) else ("" if v is None else v)) for v in (r[c] for c in cols)])
++        return "\ufeff" + buf.getvalue()
++
+     # ------------------------------------------------------------------ reportes
+     def dashboard(self) -> dict:
+         with self.lock:
+@@ -688,8 +806,33 @@
+                 "falsos_positivos": c("SELECT COUNT(*) FROM alerts WHERE status='FALSO_POSITIVO'"),
+                 "registros_en_listas": c("SELECT COUNT(*) FROM entries WHERE active=1"),
+                 "bitacora": dbm.verify_audit(self.conn),
++                "consultas_hoy": c("SELECT COUNT(*) FROM screenings WHERE created_at>=? AND created_at<?", *self._dia_local(0)[:2]),
++                "consultas_7_dias": self._consultas_por_dia(7),
++                "alertas_por_fuente": {r[0]: r[1] for r in self.conn.execute(
++                    "SELECT source_code, COUNT(*) FROM alerts GROUP BY source_code ORDER BY 2 DESC")},
++                "alertas_por_estado": {r[0]: r[1] for r in self.conn.execute(
++                    "SELECT status, COUNT(*) FROM alerts GROUP BY status")},
++                "sujetos_por_riesgo": {r[0]: r[1] for r in self.conn.execute(
++                    "SELECT risk_level, COUNT(*) FROM subjects GROUP BY risk_level")},
++                "listas_desactualizadas": [x["code"] for x in self.lists_status() if x.get("desactualizada")],
+             }
+ 
++    def _dia_local(self, atras: int = 0) -> tuple[str, str, str]:
++        """Inicio y fin (en UTC) y etiqueta del día local (zona horaria configurable, por defecto México -6)."""
++        off = timedelta(hours=self.s.tz_offset_hours)
++        d = (_utc() + off).date() - timedelta(days=atras)
++        ini = datetime(d.year, d.month, d.day, tzinfo=timezone.utc) - off
++        return ini.isoformat(timespec="seconds"), (ini + timedelta(days=1)).isoformat(timespec="seconds"), d.isoformat()
++
++    def _consultas_por_dia(self, dias: int) -> list[dict]:
++        out = []
++        for i in range(dias - 1, -1, -1):
++            ini, fin, etiqueta = self._dia_local(i)
++            n = self.conn.execute("SELECT COUNT(*) FROM screenings WHERE created_at>=? AND created_at<?",
++                                  (ini, fin)).fetchone()[0]
++            out.append({"fecha": etiqueta, "consultas": n})
++        return out
++
+     def backup(self, directory: str, keep: int = 30) -> str:
+         """Copia consistente de la base (API de respaldo de SQLite) con rotación."""
+         import sqlite3
+diff -ruN -x __pycache__ new3/pld-screening/pldscreen/static/index.html new4/pld-screening/pldscreen/static/index.html
+--- a/pldscreen/static/index.html
++++ b/pldscreen/static/index.html
+@@ -7,7 +7,7 @@
+ <style>
+ :root{--bg:#f6f7f9;--card:#fff;--tx:#1b1f24;--mut:#5b6572;--bd:#d9dee5;--ac:#0b5cab;--rojo:#b42318;--nar:#b54708;--ama:#8a6d00;--ver:#067647}
+ @media (prefers-color-scheme:dark){:root{--bg:#14181d;--card:#1c2229;--tx:#e8ecf1;--mut:#9aa6b4;--bd:#2d3640;--ac:#5aa7ff;--rojo:#ff8a80;--nar:#ffb86b;--ama:#f2d15b;--ver:#5bd69b}}
+-*{box-sizing:border-box}body{margin:0;font:14px/1.45 system-ui,sans-serif;background:var(--bg);color:var(--tx)}
++*{box-sizing:border-box}.mbox,main,.card{min-width:0}.mbox table{table-layout:auto}.mbox td,.mbox th{overflow-wrap:anywhere}body{margin:0;font:14px/1.45 system-ui,sans-serif;background:var(--bg);color:var(--tx)}
+ header{display:flex;gap:12px;align-items:center;flex-wrap:wrap;padding:12px 16px;background:var(--card);border-bottom:1px solid var(--bd)}
+ header h1{font-size:16px;margin:0;flex:1}nav button{margin-right:4px}
+ main{max-width:1100px;margin:0 auto;padding:16px}
+@@ -20,7 +20,7 @@
+ .b{display:inline-block;padding:1px 8px;border-radius:10px;font-size:12px;font-weight:600;border:1px solid currentColor}
+ .EXACTA,.ALTA,.CRITICA{color:var(--rojo)}.MEDIA{color:var(--nar)}.BAJA{color:var(--ama)}.ok{color:var(--ver)}
+ .res{font-size:16px;font-weight:700}.mut{color:var(--mut)}.hide{display:none!important}
+-@media(max-width:600px){th:nth-child(n+5),td:nth-child(n+5){display:none}}
++@media(max-width:600px){th:nth-child(n+5),td:nth-child(n+5){display:none}td,th{overflow-wrap:anywhere;padding:6px 5px}main{padding:10px}.card{overflow-x:auto}header{padding:10px}nav button{margin-bottom:4px}}
+ .brand{display:flex;align-items:center;gap:10px}.logo{width:34px;height:34px;border-radius:9px;background:var(--ac);color:#fff;display:grid;place-items:center;font-weight:800;font-size:15px}
+ .brand b{display:block;font-size:16px;line-height:1.1}.brand small{color:var(--mut);font-size:12px}
+ nav button.on{background:var(--ac);color:#fff;border-color:var(--ac)}
+@@ -29,6 +29,17 @@
+ .err{color:var(--rojo);min-height:20px;margin:8px 0 0}.big{font-size:22px;padding:12px 14px}
+ .banner{border-radius:8px;padding:14px 16px;border:1px solid currentColor;font-weight:700;font-size:18px;margin-bottom:12px}
+ .who{display:flex;align-items:center;gap:8px;color:var(--mut)}details summary{cursor:pointer;color:var(--ac);margin:6px 0}
++#modal{position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:flex-start;justify-content:center;padding:20px 10px;overflow:auto;z-index:50}
++.mbox{background:var(--card);border:1px solid var(--bd);border-radius:10px;max-width:880px;width:100%;padding:16px 18px}
++.mhead{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px;position:sticky;top:0;background:var(--card);padding:4px 0}
++.mbox h4{margin:16px 0 6px;font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut)}
++.kv{display:grid;grid-template-columns:150px 1fr;gap:4px 12px}.kv dt{color:var(--mut)}.kv dd{margin:0;word-break:break-word}
++.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:14px}
++.tile{background:var(--card);border:1px solid var(--bd);border-radius:8px;padding:12px}.tile b{display:block;font-size:26px;line-height:1.1}.tile span{color:var(--mut);font-size:12px}
++.bars{display:flex;align-items:flex-end;gap:8px;height:110px;margin-top:6px}.bars div{flex:1;text-align:center;font-size:11px;color:var(--mut)}
++.bars i{display:block;background:var(--ac);border-radius:4px 4px 0 0;min-height:2px;margin-bottom:3px}.hbar{display:flex;align-items:center;gap:8px;margin:4px 0}.hbar i{display:block;height:12px;background:var(--ac);border-radius:3px}
++a{color:var(--ac)}.warn{border:1px solid var(--nar);color:var(--nar);border-radius:8px;padding:10px 12px;margin-bottom:14px}
++@media print{body>*:not(#modal){display:none!important}#modal{position:static;background:none;padding:0}.mhead button{display:none}.mbox{border:0}}
+ footer{max-width:1100px;margin:0 auto;padding:6px 16px 24px;color:var(--mut);font-size:12px}
+ </style>
+ </head>
+@@ -48,9 +59,12 @@
+ <header>
+   <div class="brand"><div class="logo">PLD</div><div><b>PLD Soluciones</b><small>Consultas de listas negras</small></div></div>
+   <nav style="flex:1">
++    <button class="sec" data-t="inicio">Inicio</button>
+     <button class="sec" data-t="consulta">Consulta</button>
++    <button class="sec" data-t="lote">Lote</button>
+     <button class="sec" data-t="expediente">Expediente</button>
+     <button class="sec" data-t="alertas">Alertas</button>
++    <button class="sec" data-t="historial">Historial</button>
+     <button class="sec" data-t="listas">Listas</button>
+     <button class="sec" data-t="auditoria" data-min="2">Auditoría</button>
+     <button class="sec" data-t="usuarios" data-min="3">Usuarios</button>
+@@ -77,6 +91,26 @@
+   </div>
+   <div id="out"></div>
+ </section>
++<section id="inicio" class="hide"><div id="inb"></div></section>
++<section id="lote" class="hide">
++  <div class="card"><h3 style="margin-top:0">Consulta por lote</h3>
++    <p class="mut">Pegue filas o suba un archivo CSV (máx. 1,000). Columnas: <b>nombre, rfc, curp, fecha_nacimiento, tipo, referencia</b>. Solo «nombre» (o RFC/CURP) es obligatorio. Si pone «referencia», la persona se guarda y se monitorea.</p>
++    <p><input type="file" id="bf" accept=".csv,.txt,text/csv"> <button class="sec" id="bplant">Descargar plantilla</button></p>
++    <textarea id="bt" rows="6" style="width:100%" placeholder="nombre,rfc,curp,fecha_nacimiento,tipo,referencia&#10;Juan Pérez López,,,1980-02-03,F,C-001"></textarea>
++    <p><button id="bgo">Consultar lote</button> <button class="sec" id="bcsv" disabled>Descargar resultados (CSV)</button> <span id="bmsg" class="mut"></span></p>
++  </div><div id="bout"></div>
++</section>
++<section id="historial" class="hide">
++  <div class="card"><div class="grid">
++    <div><label>Buscar nombre, RFC o referencia</label><input id="ht" style="width:100%"></div>
++    <div><label>Resultado</label><select id="hn" style="width:100%"><option value="">Todos</option><option value="EXACTA">Exacta</option><option value="ALTA">Alta</option><option value="MEDIA">Media</option><option value="BAJA">Baja</option><option value="NINGUNA">Sin coincidencias</option></select></div>
++    <div><label>Tipo</label><select id="hk" style="width:100%"><option value="">Todos</option><option value="CONSULTA">Consulta</option><option value="LOTE">Lote</option><option value="MONITOREO_LISTA">Monitoreo</option></select></div>
++    <div><label>Desde</label><input id="hd" type="date" style="width:100%"></div>
++    <div><label>Hasta</label><input id="hh" type="date" style="width:100%"></div>
++  </div>
++  <p><button id="hgo">Buscar</button> <button class="sec" id="hcsv" data-min="2">Exportar a CSV</button> <span id="hmsg" class="mut"></span></p></div>
++  <div class="card" id="hl"></div>
++</section>
+ <section id="expediente" class="hide">
+   <div class="card">
+     <div class="grid">
+@@ -105,6 +139,9 @@
+ </main>
+ <footer>Herramienta de apoyo a la consulta de listas. El resultado no sustituye el criterio del Oficial de Cumplimiento ni el dictamen de su asesor legal.</footer>
+ </div>
++<div id="modal" class="hide" role="dialog" aria-modal="true" aria-labelledby="mtitle"><div class="mbox">
++  <div class="mhead"><b id="mtitle"></b><span><button class="sec" id="mprint">Imprimir</button> <button class="sec" id="mclose">Cerrar</button></span></div>
++  <div id="mbody"></div></div></div>
+ <script>
+ const $=id=>document.getElementById(id);
+ const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+@@ -112,7 +149,7 @@
+ const RANK={analista:1,supervisor:2,admin:3};let ME=null;
+ function showLogin(msg){ME=null;try{sessionStorage.removeItem('tok')}catch(e){};$('app').classList.add('hide');$('login').classList.remove('hide');$('lerr').textContent=msg||'';$('lp').value='';$('lu').focus()}
+ function showApp(){$('login').classList.add('hide');$('app').classList.remove('hide');$('quien').textContent=`${ME.usuario} · ${ME.rol}`;
+- document.querySelectorAll('nav button[data-min]').forEach(b=>b.classList.toggle('hide',RANK[ME.rol]<+b.dataset.min));openTab('consulta')}
++ document.querySelectorAll('[data-min]').forEach(b=>b.classList.toggle('hide',RANK[ME.rol]<+b.dataset.min));openTab('consulta')}
+ async function api(p,o={}){const r=await fetch(p,{...o,headers:{'X-API-Key':TOK(),'Content-Type':'application/json'}});
+  const j=await r.json().catch(()=>({}));if(r.status==401&&p!='/v1/login'){showLogin('Su sesión terminó. Ingrese de nuevo.')}
+  if(!r.ok)throw new Error(typeof j.detail=='string'?j.detail:(r.statusText||'Error'));return j}
+@@ -123,20 +160,93 @@
+ $('salir').onclick=async()=>{try{await api('/v1/logout',{method:'POST'})}catch(e){}showLogin('')};
+ (async()=>{if(!TOK())return showLogin();try{const m=await api('/v1/me');ME={usuario:m.usuario,rol:m.rol};showApp()}catch(e){showLogin()}})();
+ function openTab(t){document.querySelectorAll('main>section').forEach(x=>x.classList.add('hide'));$(t).classList.remove('hide');
+- document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('on',b.dataset.t==t));({alertas:loadAl,listas:loadLi,auditoria:loadAu,usuarios:loadUs})[t]?.()}
++ document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('on',b.dataset.t==t));({inicio:loadIn,alertas:loadAl,historial:()=>loadHi(true),listas:loadLi,auditoria:loadAu,usuarios:loadUs})[t]?.()}
+ document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>openTab(b.dataset.t));
+ const badge=l=>l?`<span class="b ${esc(l)}">${esc(l)}</span>`:'';
+-function matches(ms){return ms.length?`<table><tr><th>Lista</th><th>Nombre en lista</th><th>Puntaje</th><th>Nivel</th><th>Razones</th></tr>${ms.map(m=>`<tr><td>${esc(m.fuente)}</td><td>${esc(m.nombre_coincidente)}<div class="mut">${esc(m.registro?.rfc||'')} ${esc(m.registro?.remarks||'')}</div></td><td>${m.puntaje}</td><td>${badge(m.nivel)}</td><td>${m.razones.map(esc).join('<br>')}</td></tr>`).join('')}</table>`:'<p class="ok">Sin coincidencias.</p>'}
++const QREG=[];
++function matches(ms,q){const qi=QREG.push(q||{})-1;return ms.length?`<table><tr><th>Lista</th><th>Nombre en lista</th><th>Puntaje</th><th>Nivel</th><th>Razones</th></tr>${ms.map(m=>`<tr><td>${esc(m.fuente)}</td><td>${esc(m.nombre_coincidente)}<div class="mut">${esc(m.registro?.rfc||'')} ${esc(m.registro?.remarks||'')}</div><a href="#" data-ficha="${m.entry_id}" data-q="${qi}">Ver ficha completa y comparar</a></td><td>${m.puntaje}</td><td>${badge(m.nivel)}</td><td>${m.razones.map(esc).join('<br>')}</td></tr>`).join('')}</table>`:'<p class="ok">Sin coincidencias.</p>'}
++function resHtml(r){const sin=!(r.coincidencias||[]).length;const q=r.consulta||{};
++ return `<div class="banner ${sin?'ok':(['EXACTA','ALTA'].includes(r.nivel_maximo)?'EXACTA':'MEDIA')}">${sin?'✔ Sin coincidencias en las listas consultadas':'⚠ '+esc(String(r.resultado||'').replaceAll('_',' '))+' '+badge(r.nivel_maximo)}</div>
++ <p>${q.nombre?`<b>${esc(q.nombre)}</b> · `:''}Riesgo sugerido: <b>${esc(r.riesgo_sugerido||'—')}</b> · Folio ${r.id_consulta??''} · ${r.id_consulta?`<a href="#" data-cons="/v1/screenings/${r.id_consulta}/constancia">Constancia imprimible</a>`:''}</p>
++ ${(r.acciones_recomendadas||[]).map(a=>`<p>• ${esc(a)}</p>`).join('')}${matches(r.coincidencias||[],q)}
++ ${(r.descartadas_previamente||[]).length?`<p class="mut">${r.descartadas_previamente.length} coincidencia(s) descartada(s) previamente como falso positivo.</p>`:''}
++ ${(r.alertas_generadas||[]).length?`<p><b>Alertas generadas:</b> ${r.alertas_generadas.join(', ')}</p>`:''}
++ <p class="mut">Huella de evidencia: ${esc(r.evidencia_sha256||'')}</p>`}
++async function abrirDoc(url){const h=await fetch(url,{headers:{'X-API-Key':TOK()}}).then(x=>x.text());const w=window.open('');w.document.write(h);w.document.close()}
++function openModal(t,h){$('mtitle').textContent=t;$('mbody').innerHTML=h;$('modal').classList.remove('hide');document.body.style.overflow='hidden'}
++function closeModal(){$('modal').classList.add('hide');document.body.style.overflow=''}
++$('mclose').onclick=closeModal;$('mprint').onclick=()=>window.print();$('modal').onclick=e=>{if(e.target.id=='modal')closeModal()};
++document.addEventListener('keydown',e=>{if(e.key=='Escape')closeModal()});
++document.addEventListener('click',e=>{const f=e.target.closest('[data-ficha]'),c=e.target.closest('[data-cons]'),v=e.target.closest('[data-ver]');
++ if(f){e.preventDefault();verFicha(+f.dataset.ficha,+f.dataset.q)}else if(c){e.preventDefault();abrirDoc(c.dataset.cons)}else if(v){e.preventDefault();verConsulta(+v.dataset.ver)}});
++async function verConsulta(id){openModal('Consulta folio '+id,'<p class="mut">Cargando…</p>');try{const r=await api('/v1/screenings/'+id);r.id_consulta=r.id_consulta||id;$('mbody').innerHTML=resHtml(r)}catch(e){$('mbody').innerHTML=`<p style="color:var(--rojo)">${esc(e.message)}</p>`}}
++const nrm=x=>String(x??'').replace(/\s/g,'').toUpperCase();
++function cmpRow(lbl,qv,ev,kind){let st='';if(qv&&ev){if(kind=='dob'){const L=[].concat(ev);st=L.some(d=>nrm(d)==nrm(qv))?'ok':L.some(d=>String(d).slice(0,4)==String(qv).slice(0,4))?'near':'no'}
++ else if(kind=='rfc'){st=nrm(qv)==nrm(ev)?'ok':nrm(qv).slice(0,10)==nrm(ev).slice(0,10)?'near':'no'}else st=nrm(qv)==nrm(ev)?'ok':'no'}
++ const mk=st=='ok'?'<span class="ok">✔ coincide</span>':st=='near'?'<span style="color:var(--nar)">≈ parcial</span>':st=='no'?'<span style="color:var(--rojo)">✗ distinto</span>':'<span class="mut">— sin dato para comparar</span>';
++ return `<tr><td>${lbl}</td><td>${esc(qv||'—')}</td><td>${esc([].concat(ev||'—').join(', '))}<div>${mk}</div></td></tr>`}
++async function verFicha(id,qi){openModal('Ficha del registro','<p class="mut">Cargando…</p>');try{const f=await api('/v1/entries/'+id);const q=QREG[qi]||{};const sd=f.fuente_detalle||{};
++ const kv=(k,v)=>v?`<dt>${k}</dt><dd>${esc(v)}</dd>`:'';
++ $('mbody').innerHTML=`<p style="margin:0"><span class="res">${esc(f.nombre)}</span> ${badge(sd.severity)} <span class="b">${esc(f.fuente)}</span> ${f.estatus?`<span class="b">${esc(f.estatus)}</span>`:''} ${f.activo?'':'<span class="b BAJA">Ya no está en la lista vigente</span>'}</p>
++ <h4>Su consulta frente al registro</h4><table><tr><th></th><th>Su consulta</th><th>Registro en la lista</th></tr>
++ <tr><td>Nombre</td><td>${esc(q.nombre||'—')}</td><td>${esc(f.nombre)}<div class="mut">revise también los alias abajo</div></td></tr>
++ ${cmpRow('RFC',q.rfc,f.rfc,'rfc')}${cmpRow('CURP',q.curp,f.curp)}${cmpRow('Fecha de nacimiento',q.fecha_nacimiento,f.fechas_nacimiento?.length?f.fechas_nacimiento:null,'dob')}${cmpRow('País',q.pais,f.pais)}</table>
++ <p class="mut">Coincidir en el nombre no confirma que sea la misma persona: valide con identificación oficial, fecha de nacimiento y demás datos antes de decidir.</p>
++ <h4>Nombres y alias en la lista</h4><table>${f.nombres.map(n=>`<tr><td>${esc(n.name)}</td><td class="mut">${esc(n.kind=='primary'?'nombre principal':n.kind)}</td></tr>`).join('')}</table>
++ <h4>Datos del registro</h4><dl class="kv">${kv('Tipo',f.tipo=='F'?'Persona física':f.tipo=='M'?'Persona moral':f.tipo)}${kv('RFC',f.rfc)}${kv('CURP',f.curp)}${kv('Fechas de nacimiento',(f.fechas_nacimiento||[]).join(', '))}${kv('País',f.pais)}${kv('Programa',f.programa)}${kv('Estatus',f.estatus)}${kv('Observaciones',f.observaciones)}${kv('ID en la fuente',f.id_externo)}</dl>
++ <h4>Fuente</h4><dl class="kv">${kv('Lista',sd.name)}${kv('Autoridad',sd.authority)}${kv('Fundamento',sd.legal_basis)}${kv('Qué hacer',sd.action)}${f.version_lista?kv('Versión cargada',`${f.version_lista.fetched_at?.slice(0,16).replace('T',' ')} · ${f.version_lista.filename||''} · ${f.version_lista.entry_count} registros`):''}</dl>
++ ${f.otras_apariciones.length?`<h4>También aparece en</h4><table>${f.otras_apariciones.map(o=>`<tr><td>${esc(o.fuente)}</td><td>${esc(o.nombre)} <span class="mut">(mismo ${esc(o.coincide_por)})</span></td><td><a href="#" data-ficha="${o.entry_id}" data-q="${qi}">Ver ficha</a></td></tr>`).join('')}</table>`:''}
++ ${f.verificar_en?`<h4>Verificar en la fuente oficial</h4><p><a href="${esc(f.verificar_en.url)}" target="_blank" rel="noopener noreferrer">${esc(f.verificar_en.nombre)} ↗</a> <span class="mut">· busque por «${esc(f.id_externo)}» o por el nombre</span></p>`:''}`}catch(e){$('mbody').innerHTML=`<p style="color:var(--rojo)">${esc(e.message)}</p>`}}
+ $('go').onclick=async()=>{$('msg').textContent='Consultando…';try{
+  const body={referencia:$('ref').value||undefined,nombre:$('nombre').value||undefined,tipo:$('tipo').value||undefined,rfc:$('rfc').value||undefined,curp:$('curp').value||undefined,fecha_nacimiento:$('dob').value||undefined};
+  const r=await api('/v1/screen',{method:'POST',body:JSON.stringify(body)});$('msg').textContent='';
+- const sin=!r.coincidencias.length;$('out').innerHTML=`<div class="card"><div class="banner ${sin?'ok':(['EXACTA','ALTA'].includes(r.nivel_maximo)?'EXACTA':'MEDIA')}">${sin?'✔ Sin coincidencias en las listas consultadas':'⚠ '+esc(String(r.resultado).replaceAll('_',' '))+' '+badge(r.nivel_maximo)}</div><p>Riesgo sugerido: <b>${esc(r.riesgo_sugerido)}</b> · Folio ${r.id_consulta} · <a href="#" id="cons">Constancia imprimible</a></p>
+- ${r.acciones_recomendadas.map(a=>`<p>• ${esc(a)}</p>`).join('')}${matches(r.coincidencias)}
+- ${r.descartadas_previamente.length?`<p class="mut">${r.descartadas_previamente.length} coincidencia(s) descartada(s) previamente como falso positivo.</p>`:''}
+- ${r.alertas_generadas.length?`<p><b>Alertas generadas:</b> ${r.alertas_generadas.join(', ')}</p>`:''}
+- <p class="mut">Huella de evidencia: ${esc(r.evidencia_sha256)}</p></div>`;
+- $('cons').onclick=async e=>{e.preventDefault();const h=await fetch(`/v1/screenings/${r.id_consulta}/constancia`,{headers:{'X-API-Key':TOK()}}).then(x=>x.text());const w=window.open('');w.document.write(h);w.document.close()}
++ $('out').innerHTML=`<div class="card">${resHtml(r)}</div>`
+ }catch(e){$('msg').textContent='';$('out').innerHTML=`<div class="card" style="color:var(--rojo)">${esc(e.message)}</div>`}};
++/* ---------- Inicio (tablero) ---------- */
++async function loadIn(){try{const d=await api('/v1/dashboard');const max=Math.max(1,...d.consultas_7_dias.map(x=>x.consultas));const mf=Math.max(1,...Object.values(d.alertas_por_fuente||{}),1);
++ const T=(n,t,c)=>`<div class="tile"><b${c?` style="color:var(--${c})"`:''}>${n}</b><span>${t}</span></div>`;
++ $('inb').innerHTML=`${d.listas_desactualizadas.length?`<div class="warn">⚠ Listas automáticas sin actualizar: <b>${d.listas_desactualizadas.map(esc).join(', ')}</b>. Revise la pestaña Listas.</div>`:''}
++ ${d.bitacora.ok?'':'<div class="warn">⚠ La bitácora de auditoría no pasó la verificación de integridad. Avise al administrador.</div>'}
++ <div class="tiles">${T(d.consultas_hoy,'consultas hoy')}${T(d.alertas_abiertas,'alertas abiertas')}${T(d.alertas_vencidas,'alertas vencidas',d.alertas_vencidas?'rojo':'')}${T(d.alertas_pendientes_aprobacion,'pendientes de aprobar')}${T(d.sujetos,'personas en monitoreo')}${T(d.registros_en_listas.toLocaleString('es-MX'),'registros en listas')}</div>
++ <div class="grid"><div class="card"><b>Consultas, últimos 7 días</b><div class="bars">${d.consultas_7_dias.map(x=>`<div title="${x.consultas} consultas"><i style="height:${Math.round(x.consultas/max*80)}px"></i>${x.consultas}<br>${x.fecha.slice(5)}</div>`).join('')}</div></div>
++ <div class="card"><b>Alertas por lista</b>${Object.entries(d.alertas_por_fuente||{}).map(([k,v])=>`<div class="hbar"><span style="width:110px">${esc(k)}</span><i style="width:${Math.max(4,v/mf*160)}px"></i>${v}</div>`).join('')||'<p class="mut">Sin alertas.</p>'}
++ <p class="mut" style="margin-bottom:0">Confirmadas: ${d.alertas_confirmadas} · Falsos positivos: ${d.falsos_positivos}</p></div></div>
++ <p class="mut">Bitácora: ${d.bitacora.ok?'<span class="ok">íntegra ✔</span>':'con problemas'} · ${d.bitacora.records??d.bitacora.registros??''} registros encadenados.</p>`}catch(e){$('inb').innerHTML=`<div class="card" style="color:var(--rojo)">${esc(e.message)}</div>`}}
++/* ---------- Historial ---------- */
++let HOFF=0;const hq=()=>{const p=new URLSearchParams();[['texto','ht'],['nivel','hn'],['tipo','hk'],['desde','hd'],['hasta','hh']].forEach(([k,i])=>{if($(i).value)p.set(k,$(i).value)});return p};
++async function loadHi(reset){if(reset)HOFF=0;$('hmsg').textContent='Buscando…';try{const p=hq();p.set('limit',50);p.set('offset',HOFF);const r=await api('/v1/screenings?'+p);$('hmsg').textContent='';
++ const rows=r.map(x=>`<tr><td><b>${esc(x.nombre||'')}</b><div class="mut">${esc(x.rfc||x.referencia||'')}</div></td><td>${x.nivel_maximo?badge(x.nivel_maximo):'<span class="ok">Sin coincidencias</span>'}<div class="mut">${esc(x.fuentes.join(', '))}</div></td><td><a href="#" data-ver="${x.id}">Ver</a> · <a href="#" data-cons="/v1/screenings/${x.id}/constancia">Constancia</a></td><td>${esc(x.fecha.slice(0,16).replace('T',' '))}<div class="mut">folio ${x.id}</div></td><td>${esc(x.tipo)}</td><td>${esc(x.usuario)}</td></tr>`).join('');
++ const head='<table><tr><th>Persona</th><th>Resultado</th><th></th><th>Fecha</th><th>Tipo</th><th>Usuario</th></tr>';
++ if(reset)$('hl').innerHTML=head+rows+'</table>';else $('hl').querySelector('table').insertAdjacentHTML('beforeend',rows);
++ if(!r.length&&reset)$('hl').innerHTML='<p class="mut">No hay consultas con esos filtros.</p>';
++ $('hl').querySelector('#hmore')?.remove();if(r.length==50)$('hl').insertAdjacentHTML('beforeend','<p id="hmore"><button class="sec">Cargar más</button></p>')}catch(e){$('hmsg').textContent=e.message}}
++$('hgo').onclick=()=>loadHi(true);$('ht').onkeydown=e=>{if(e.key=='Enter')loadHi(true)};
++$('hl').onclick=e=>{if(e.target.closest('#hmore button')){HOFF+=50;loadHi(false)}};
++$('hcsv').onclick=async()=>{try{const r=await fetch('/v1/screenings/export.csv?'+hq(),{headers:{'X-API-Key':TOK()}});if(!r.ok)throw new Error((await r.json().catch(()=>({}))).detail||'No se pudo exportar');
++ const a=document.createElement('a');a.href=URL.createObjectURL(await r.blob());a.download='historial_consultas.csv';a.click()}catch(e){$('hmsg').textContent=e.message}};
++/* ---------- Lote ---------- */
++const COLS=['nombre','rfc','curp','fecha_nacimiento','tipo','referencia'];let BRES=[];
++function parseCSV(t){t=t.replace(/^﻿/,'');const f=t.split(/\r?\n/)[0]||'';const sep=f.includes('\t')?'\t':(f.split(';').length>f.split(',').length?';':',');const rows=[];let row=[],cur='',q=false;
++ for(let i=0;i<t.length;i++){const c=t[i];if(q){if(c=='"'){if(t[i+1]=='"'){cur+='"';i++}else q=false}else cur+=c}else if(c=='"')q=true;else if(c==sep){row.push(cur);cur=''}else if(c=='\n'){row.push(cur);rows.push(row);row=[];cur=''}else if(c!='\r')cur+=c}
++ if(cur||row.length){row.push(cur);rows.push(row)}return rows.filter(r=>r.some(x=>x.trim()))}
++const hnorm=h=>h.normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase().trim().replace(/[\s-]+/g,'_');
++const SYN={nombre:'nombre',razon_social:'nombre',nombre_completo:'nombre',name:'nombre',rfc:'rfc',curp:'curp',fecha_nacimiento:'fecha_nacimiento',nacimiento:'fecha_nacimiento',dob:'fecha_nacimiento',tipo:'tipo',tipo_persona:'tipo',referencia:'referencia',ref:'referencia',id:'referencia'};
++function rowsToItems(rows){let map=COLS;const h=rows[0].map(x=>SYN[hnorm(x)]);if(h.some(Boolean)){map=h;rows=rows.slice(1)}
++ return rows.map(r=>{const o={};map.forEach((k,i)=>{if(k&&(r[i]||'').trim())o[k]=r[i].trim()});if(o.tipo)o.tipo=o.tipo.toUpperCase().slice(0,1);return o}).filter(o=>o.nombre||o.rfc||o.curp)}
++$('bf').onchange=async e=>{const f=e.target.files[0];if(f)$('bt').value=await f.text()};
++$('bplant').onclick=()=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['﻿nombre,rfc,curp,fecha_nacimiento,tipo,referencia\nJuan Pérez López,,,1980-02-03,F,C-001\nConstructora Ejemplo SA de CV,CEJ010101AB1,,,M,C-002\n'],{type:'text/csv'}));a.download='plantilla_lote.csv';a.click()};
++const csvc=v=>{v=v==null?'':String(v);if(/^[=+\-@]/.test(v))v="'"+v;return /[",\n;]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v};
++$('bgo').onclick=async()=>{let items;try{items=rowsToItems(parseCSV($('bt').value))}catch(e){items=[]}
++ if(!items.length){$('bmsg').textContent='No encontré filas válidas.';return}if(items.length>1000){$('bmsg').textContent='Máximo 1,000 filas por lote.';return}
++ $('bgo').disabled=true;BRES=[];$('bcsv').disabled=true;
++ try{for(let i=0;i<items.length;i+=25){$('bmsg').textContent=`Consultando ${Math.min(i+25,items.length)} de ${items.length}…`;const part=items.slice(i,i+25);
++  const r=await api('/v1/screen/batch',{method:'POST',body:JSON.stringify(part)});r.forEach((x,j)=>BRES.push({...part[j],...x}))}
++  $('bmsg').textContent=`Listo: ${BRES.length} consultadas.`;$('bcsv').disabled=false;
++  const con=BRES.filter(x=>x.coincidencias>0).length,err=BRES.filter(x=>x.error).length;
++  $('bout').innerHTML=`<div class="card"><p><b>${BRES.length}</b> consultadas · <b style="color:${con?'var(--nar)':'var(--ver)'}">${con}</b> con coincidencias${err?` · <b style="color:var(--rojo)">${err}</b> con error`:''}</p><table><tr><th>Persona</th><th>Resultado</th><th></th><th>Coincidencias</th><th>#</th></tr>${BRES.map((x,i)=>`<tr><td><b>${esc(x.nombre||'')}</b><div class="mut">${esc(x.rfc||x.referencia||'')}</div></td><td>${x.error?`<span style="color:var(--rojo)">${esc(x.error)}</span>`:x.nivel_maximo?badge(x.nivel_maximo):'<span class="ok">Sin coincidencias</span>'}</td><td>${x.id_consulta?`<a href="#" data-ver="${x.id_consulta}">Ver</a>`:''}</td><td>${x.coincidencias??''}</td><td>${i+1}</td></tr>`).join('')}</table></div>`
++ }catch(e){$('bmsg').textContent=e.message}$('bgo').disabled=false};
++$('bcsv').onclick=()=>{const c=['nombre','rfc','curp','fecha_nacimiento','tipo','referencia','nivel_maximo','resultado','coincidencias','id_consulta','error'];
++ const t='﻿'+c.join(',')+'\n'+BRES.map(x=>c.map(k=>csvc(x[k])).join(',')).join('\n');const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([t],{type:'text/csv'}));a.download='resultados_lote.csv';a.click()};
+ const ROLES=['ENAJENANTE','ADQUIRENTE','VENDEDOR','COMPRADOR','DONANTE','DONATARIO','FIDEICOMITENTE','FIDEICOMISARIO','FIDUCIARIO','APODERADO','REPRESENTANTE','BENEFICIARIO_CONTROLADOR','SOCIO','ACCIONISTA','ARRENDADOR','ARRENDATARIO','PROMITENTE_VENDEDOR','PROMITENTE_COMPRADOR','OTORGANTE','OTRO'];
+ function rowHtml(rel){return `<div class="card ${rel?'rel':'par'}" style="margin:6px 0 6px ${rel?'28px':'0'}"><div class="grid">
+  <div><label>Rol</label><select class="f-rol" style="width:100%">${ROLES.map(r=>`<option ${rel&&r=='BENEFICIARIO_CONTROLADOR'?'selected':''}>${r}</option>`).join('')}</select></div>
+@@ -164,7 +274,7 @@
+ }catch(e){$('msge').textContent='';$('oute').innerHTML=`<div class="card" style="color:var(--rojo)">${esc(e.message)}</div>`}};
+ $('clr').onclick=()=>{['nombre','rfc','curp','dob','ref'].forEach(i=>$(i).value='');$('tipo').value='';$('out').innerHTML='';$('nombre').focus()};
+ $('nombre').onkeydown=e=>{if(e.key=='Enter')$('go').click()};
+-async function loadUs(){try{const u=await api('/v1/users');$('ul').innerHTML=`<table><tr><th>Usuario</th><th>Rol</th><th>Entra por la página</th><th>Estado</th><th></th></tr>${u.map(x=>`<tr><td><b>${esc(x.usuario)}</b></td><td>${esc(x.rol)}</td><td>${x.puede_entrar_web?'Sí':'No (solo integración)'}</td><td>${x.activo?'<span class="ok">Activo</span>':'<span class="mut">Desactivado</span>'}</td><td><button class="sec" onclick="cambiarPw('${esc(x.usuario)}')">Cambiar contraseña</button> <button class="sec" onclick="alterna('${esc(x.usuario)}',${x.activo})">${x.activo?'Desactivar':'Activar'}</button></td></tr>`).join('')}</table>`}catch(e){$('ul').textContent=e.message}}
++async function loadUs(){try{const u=await api('/v1/users');$('ul').innerHTML=`<table><tr><th>Usuario</th><th>Rol</th><th>Estado</th><th></th><th>Entra por la página</th></tr>${u.map(x=>`<tr><td><b>${esc(x.usuario)}</b></td><td>${esc(x.rol)}</td><td>${x.activo?'<span class="ok">Activo</span>':'<span class="mut">Desactivado</span>'}</td><td><button class="sec" onclick="cambiarPw('${esc(x.usuario)}')">Cambiar contraseña</button> <button class="sec" onclick="alterna('${esc(x.usuario)}',${x.activo})">${x.activo?'Desactivar':'Activar'}</button></td><td>${x.puede_entrar_web?'Sí':'No (solo integración)'}</td></tr>`).join('')}</table>`}catch(e){$('ul').textContent=e.message}}
+ $('nuc').onclick=async()=>{$('nmsg').textContent='';try{await api('/v1/users',{method:'POST',body:JSON.stringify({usuario:$('nu').value.trim(),rol:$('nr').value,contrasena:$('np').value})});$('nu').value='';$('np').value='';$('nmsg').textContent='Usuario creado.';loadUs()}catch(e){$('nmsg').textContent=e.message}};
+ async function cambiarPw(n){const p=prompt(`Nueva contraseña para ${n} (mín. 10 caracteres):`);if(!p)return;try{await api(`/v1/users/${encodeURIComponent(n)}/password`,{method:'POST',body:JSON.stringify({contrasena:p})});alert('Contraseña actualizada.')}catch(e){alert(e.message)}}
+ async function alterna(n,act){try{await api(`/v1/users/${encodeURIComponent(n)}/${act?'desactivar':'activar'}`,{method:'POST'});loadUs()}catch(e){alert(e.message)}}
+@@ -174,7 +284,7 @@
+ async function res(id,r){const n=prompt(`Justificación para ${r} (mín. 10 caracteres):`);if(!n)return;try{await api(`/v1/alerts/${id}/resolve`,{method:'POST',body:JSON.stringify({resolucion:r,nota:n})});loadAl()}catch(e){alert(e.message)}}
+ async function loadLi(){try{const l=await api('/v1/lists');const MODO={AUTOMATICA:'Se actualiza sola',API:'Por API del proveedor',MANUAL:'Carga manual de archivo'};
+  const est=x=>x.estado=='OK'||x.estado=='CONECTADA'?`<span class="ok">${esc(x.estado)}</span>`:(x.desactualizada?`<span class="b ALTA">${esc(x.estado)}</span>`:`<span class="mut">${esc(x.estado)}</span>`);
+- $('li').innerHTML=`<table><tr><th>Fuente</th><th>Autoridad</th><th>Severidad</th><th>Registros</th><th>Última carga</th><th>Cómo se actualiza</th><th>Estado</th></tr>${l.map(x=>`<tr><td><b>${esc(x.code)}</b><div class="mut">${esc(x.name)}</div></td><td>${esc(x.authority)}</td><td>${badge(x.severity)}</td><td>${x.ultima_version?.entry_count??'—'}</td><td>${esc(x.ultima_version?.fetched_at?.slice(0,16).replace('T',' ')||'—')}</td><td>${esc(MODO[x.modo]||'')}</td><td>${est(x)}</td></tr>`).join('')}</table><p class="mut">«Se actualiza sola»: el sistema las descarga cada ${'6'} horas mientras el servicio de actualización esté encendido. «Carga manual»: requiere que alguien deposite el archivo (ver guía).</p>`}catch(e){$('li').textContent=e.message}}
++ $('li').innerHTML=`<table><tr><th>Fuente</th><th>Estado</th><th>Registros</th><th>Última carga</th><th>Cómo se actualiza</th><th>Autoridad</th><th>Severidad</th></tr>${l.map(x=>`<tr><td><b>${esc(x.code)}</b><div class="mut">${esc(x.name)}</div></td><td>${est(x)}</td><td>${x.ultima_version?.entry_count??'—'}</td><td>${esc(x.ultima_version?.fetched_at?.slice(0,16).replace('T',' ')||'—')}</td><td>${esc(MODO[x.modo]||'')}</td><td>${esc(x.authority)}</td><td>${badge(x.severity)}</td></tr>`).join('')}</table><p class="mut">«Se actualiza sola»: el sistema las descarga cada ${'6'} horas mientras el servicio de actualización esté encendido. «Carga manual»: requiere que alguien deposite el archivo (ver guía).</p>`}catch(e){$('li').textContent=e.message}}
+ async function loadAu(){try{const v=await api('/v1/audit/verify');const a=await api('/v1/audit?limit=50');$('au').innerHTML=`<p>Integridad de la bitácora: <b class="${v.ok?'ok':'EXACTA'}">${v.ok?'ÍNTEGRA':'ALTERADA'}</b> (${v.registros} registros)</p><table><tr><th>#</th><th>Fecha</th><th>Usuario</th><th>Acción</th><th>Detalle</th></tr>${a.map(x=>`<tr><td>${x.seq}</td><td>${esc(x.ts.slice(0,19))}</td><td>${esc(x.actor)}</td><td>${esc(x.action)}</td><td class="mut">${esc(x.detail.slice(0,140))}</td></tr>`).join('')}</table>`}catch(e){$('au').textContent=e.message}}
+ </script>
+ </body>
+diff -ruN -x __pycache__ new3/pld-screening/tests/test_ficha_historial.py new4/pld-screening/tests/test_ficha_historial.py
+--- a/tests/test_ficha_historial.py
++++ b/tests/test_ficha_historial.py
+@@ -0,0 +1,79 @@
++import json
++
++import pytest
++from fastapi.testclient import TestClient
++
++from pldscreen.api import create_app
++from pldscreen.service import ServiceError
++
++
++@pytest.fixture()
++def client(svc, keys):
++    return TestClient(create_app(svc)), keys
++
++
++def test_ficha_completa_de_coincidencia(svc):
++    r = svc.screen({"nombre": "Ramon Quintero Salas"}, "ana")
++    assert r["coincidencias"]
++    ficha = svc.entry_detail(r["coincidencias"][0]["entry_id"])
++    assert ficha["nombre"] and ficha["fuente"] and ficha["nombres"]
++    assert ficha["fuente_detalle"]["authority"] and ficha["version_lista"]["entry_count"] >= 1
++    assert isinstance(ficha["fechas_nacimiento"], list)
++    with pytest.raises(ServiceError):
++        svc.entry_detail(999999)
++
++
++def test_historial_filtros_y_resultado_completo(svc):
++    a = svc.screen({"nombre": "Ramon Quintero Salas"}, "ana")
++    svc.screen({"nombre": "Persona Totalmente Inventada Xyz"}, "beto")
++    todos = svc.screening_history()
++    assert len(todos) >= 2 and todos[0]["id"] > todos[1]["id"]
++    assert [x for x in svc.screening_history(texto="quintero") if x["nombre"].lower().startswith("ramon")]
++    assert not svc.screening_history(texto="no_existe_jamas")
++    assert svc.screening_history(texto="100%") == []          # comodines escapados: no coincide con todo
++    assert all(x["nivel_maximo"] == a["nivel_maximo"] for x in svc.screening_history(nivel=a["nivel_maximo"]))
++    assert svc.get_screening(a["id_consulta"])["evidencia_sha256"] == a["evidencia_sha256"]
++
++
++def test_csv_evita_inyeccion_de_formulas(svc):
++    svc.screen({"nombre": "=HYPERLINK(\"http://x\")"}, "ana")
++    csv_text = svc.history_csv()
++    assert csv_text.startswith("﻿id,fecha")
++    assert "'=HYPERLINK" in csv_text and ",=HYPERLINK" not in csv_text
++
++
++def test_dashboard_ampliado(svc):
++    svc.screen({"nombre": "Ramon Quintero Salas", "referencia": "C-1"}, "ana")
++    d = svc.dashboard()
++    assert d["consultas_hoy"] >= 1 and len(d["consultas_7_dias"]) == 7
++    assert d["consultas_7_dias"][-1]["consultas"] >= 1
++    assert isinstance(d["alertas_por_fuente"], dict) and "listas_desactualizadas" in d
++
++
++def test_api_permisos(client):
++    c, k = client
++    ha, hs = {"X-API-Key": k["analista"]}, {"X-API-Key": k["supervisor"]}
++    sid = c.post("/v1/screen", json={"nombre": "Ramon Quintero Salas"}, headers=ha).json()
++    assert c.get("/v1/screenings", headers=ha).status_code == 200
++    assert c.get(f"/v1/screenings/{sid['id_consulta']}", headers=ha).json()["resultado"]
++    assert c.get(f"/v1/entries/{sid['coincidencias'][0]['entry_id']}", headers=ha).status_code == 200
++    assert c.get("/v1/screenings/export.csv", headers=ha).status_code == 403     # solo supervisor
++    r = c.get("/v1/screenings/export.csv", headers=hs)
++    assert r.status_code == 200 and r.headers["content-type"].startswith("text/csv")
++    assert c.get("/v1/entries/1").status_code == 401
++
++
++def test_dia_local_usa_zona_de_mexico(svc):
++    ini, fin, etiqueta = svc._dia_local(0)
++    assert ini.endswith("+00:00") and ini[11:19] == "06:00:00"      # medianoche de CDMX = 06:00 UTC
++    assert fin > ini and len(etiqueta) == 10
++    assert [x["fecha"] for x in svc._consultas_por_dia(3)] == [svc._dia_local(2)[2], svc._dia_local(1)[2], etiqueta]
++
++
++def test_filtro_de_fechas_en_hora_local(svc):
++    svc.screen({"nombre": "Ramon Quintero Salas"}, "ana")
++    hoy = svc._dia_local(0)[2]
++    assert svc.screening_history(desde=hoy, hasta=hoy)
++    assert not svc.screening_history(hasta=svc._dia_local(1)[2])      # ayer: aún no había consultas
++    with pytest.raises(ServiceError):
++        svc.screening_history(desde="ayer")

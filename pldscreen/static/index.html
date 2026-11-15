@@ -7,7 +7,7 @@
 <style>
 :root{--bg:#f6f7f9;--card:#fff;--tx:#1b1f24;--mut:#5b6572;--bd:#d9dee5;--ac:#0b5cab;--rojo:#b42318;--nar:#b54708;--ama:#8a6d00;--ver:#067647}
 @media (prefers-color-scheme:dark){:root{--bg:#14181d;--card:#1c2229;--tx:#e8ecf1;--mut:#9aa6b4;--bd:#2d3640;--ac:#5aa7ff;--rojo:#ff8a80;--nar:#ffb86b;--ama:#f2d15b;--ver:#5bd69b}}
-*{box-sizing:border-box}body{margin:0;font:14px/1.45 system-ui,sans-serif;background:var(--bg);color:var(--tx)}
+*{box-sizing:border-box}.mbox,main,.card{min-width:0}.mbox table{table-layout:auto}.mbox td,.mbox th{overflow-wrap:anywhere}body{margin:0;font:14px/1.45 system-ui,sans-serif;background:var(--bg);color:var(--tx)}
 header{display:flex;gap:12px;align-items:center;flex-wrap:wrap;padding:12px 16px;background:var(--card);border-bottom:1px solid var(--bd)}
 header h1{font-size:16px;margin:0;flex:1}nav button{margin-right:4px}
 main{max-width:1100px;margin:0 auto;padding:16px}
@@ -20,7 +20,7 @@ table{width:100%;border-collapse:collapse}th,td{padding:6px 8px;border-bottom:1p
 .b{display:inline-block;padding:1px 8px;border-radius:10px;font-size:12px;font-weight:600;border:1px solid currentColor}
 .EXACTA,.ALTA,.CRITICA{color:var(--rojo)}.MEDIA{color:var(--nar)}.BAJA{color:var(--ama)}.ok{color:var(--ver)}
 .res{font-size:16px;font-weight:700}.mut{color:var(--mut)}.hide{display:none!important}
-@media(max-width:600px){th:nth-child(n+5),td:nth-child(n+5){display:none}}
+@media(max-width:600px){th:nth-child(n+5),td:nth-child(n+5){display:none}td,th{overflow-wrap:anywhere;padding:6px 5px}main{padding:10px}.card{overflow-x:auto}header{padding:10px}nav button{margin-bottom:4px}}
 .brand{display:flex;align-items:center;gap:10px}.logo{width:34px;height:34px;border-radius:9px;background:var(--ac);color:#fff;display:grid;place-items:center;font-weight:800;font-size:15px}
 .brand b{display:block;font-size:16px;line-height:1.1}.brand small{color:var(--mut);font-size:12px}
 nav button.on{background:var(--ac);color:#fff;border-color:var(--ac)}
@@ -29,6 +29,17 @@ nav button.on{background:var(--ac);color:#fff;border-color:var(--ac)}
 .err{color:var(--rojo);min-height:20px;margin:8px 0 0}.big{font-size:22px;padding:12px 14px}
 .banner{border-radius:8px;padding:14px 16px;border:1px solid currentColor;font-weight:700;font-size:18px;margin-bottom:12px}
 .who{display:flex;align-items:center;gap:8px;color:var(--mut)}details summary{cursor:pointer;color:var(--ac);margin:6px 0}
+#modal{position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:flex-start;justify-content:center;padding:20px 10px;overflow:auto;z-index:50}
+.mbox{background:var(--card);border:1px solid var(--bd);border-radius:10px;max-width:880px;width:100%;padding:16px 18px}
+.mhead{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px;position:sticky;top:0;background:var(--card);padding:4px 0}
+.mbox h4{margin:16px 0 6px;font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut)}
+.kv{display:grid;grid-template-columns:150px 1fr;gap:4px 12px}.kv dt{color:var(--mut)}.kv dd{margin:0;word-break:break-word}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:14px}
+.tile{background:var(--card);border:1px solid var(--bd);border-radius:8px;padding:12px}.tile b{display:block;font-size:26px;line-height:1.1}.tile span{color:var(--mut);font-size:12px}
+.bars{display:flex;align-items:flex-end;gap:8px;height:110px;margin-top:6px}.bars div{flex:1;text-align:center;font-size:11px;color:var(--mut)}
+.bars i{display:block;background:var(--ac);border-radius:4px 4px 0 0;min-height:2px;margin-bottom:3px}.hbar{display:flex;align-items:center;gap:8px;margin:4px 0}.hbar i{display:block;height:12px;background:var(--ac);border-radius:3px}
+a{color:var(--ac)}.warn{border:1px solid var(--nar);color:var(--nar);border-radius:8px;padding:10px 12px;margin-bottom:14px}
+@media print{body>*:not(#modal){display:none!important}#modal{position:static;background:none;padding:0}.mhead button{display:none}.mbox{border:0}}
 footer{max-width:1100px;margin:0 auto;padding:6px 16px 24px;color:var(--mut);font-size:12px}
 </style>
 </head>
@@ -48,9 +59,12 @@ footer{max-width:1100px;margin:0 auto;padding:6px 16px 24px;color:var(--mut);fon
 <header>
   <div class="brand"><div class="logo">PLD</div><div><b>PLD Soluciones</b><small>Consultas de listas negras</small></div></div>
   <nav style="flex:1">
+    <button class="sec" data-t="inicio">Inicio</button>
     <button class="sec" data-t="consulta">Consulta</button>
+    <button class="sec" data-t="lote">Lote</button>
     <button class="sec" data-t="expediente">Expediente</button>
     <button class="sec" data-t="alertas">Alertas</button>
+    <button class="sec" data-t="historial">Historial</button>
     <button class="sec" data-t="listas">Listas</button>
     <button class="sec" data-t="auditoria" data-min="2">Auditoría</button>
     <button class="sec" data-t="usuarios" data-min="3">Usuarios</button>
@@ -76,6 +90,26 @@ footer{max-width:1100px;margin:0 auto;padding:6px 16px 24px;color:var(--mut);fon
     <p><button id="go" style="padding:10px 22px;font-size:15px">Consultar</button> <button class="sec" id="clr">Limpiar</button> <span id="msg" class="mut"></span></p>
   </div>
   <div id="out"></div>
+</section>
+<section id="inicio" class="hide"><div id="inb"></div></section>
+<section id="lote" class="hide">
+  <div class="card"><h3 style="margin-top:0">Consulta por lote</h3>
+    <p class="mut">Pegue filas o suba un archivo CSV (máx. 1,000). Columnas: <b>nombre, rfc, curp, fecha_nacimiento, tipo, referencia</b>. Solo «nombre» (o RFC/CURP) es obligatorio. Si pone «referencia», la persona se guarda y se monitorea.</p>
+    <p><input type="file" id="bf" accept=".csv,.txt,text/csv"> <button class="sec" id="bplant">Descargar plantilla</button></p>
+    <textarea id="bt" rows="6" style="width:100%" placeholder="nombre,rfc,curp,fecha_nacimiento,tipo,referencia&#10;Juan Pérez López,,,1980-02-03,F,C-001"></textarea>
+    <p><button id="bgo">Consultar lote</button> <button class="sec" id="bcsv" disabled>Descargar resultados (CSV)</button> <span id="bmsg" class="mut"></span></p>
+  </div><div id="bout"></div>
+</section>
+<section id="historial" class="hide">
+  <div class="card"><div class="grid">
+    <div><label>Buscar nombre, RFC o referencia</label><input id="ht" style="width:100%"></div>
+    <div><label>Resultado</label><select id="hn" style="width:100%"><option value="">Todos</option><option value="EXACTA">Exacta</option><option value="ALTA">Alta</option><option value="MEDIA">Media</option><option value="BAJA">Baja</option><option value="NINGUNA">Sin coincidencias</option></select></div>
+    <div><label>Tipo</label><select id="hk" style="width:100%"><option value="">Todos</option><option value="CONSULTA">Consulta</option><option value="LOTE">Lote</option><option value="MONITOREO_LISTA">Monitoreo</option></select></div>
+    <div><label>Desde</label><input id="hd" type="date" style="width:100%"></div>
+    <div><label>Hasta</label><input id="hh" type="date" style="width:100%"></div>
+  </div>
+  <p><button id="hgo">Buscar</button> <button class="sec" id="hcsv" data-min="2">Exportar a CSV</button> <span id="hmsg" class="mut"></span></p></div>
+  <div class="card" id="hl"></div>
 </section>
 <section id="expediente" class="hide">
   <div class="card">
@@ -105,6 +139,9 @@ footer{max-width:1100px;margin:0 auto;padding:6px 16px 24px;color:var(--mut);fon
 </main>
 <footer>Herramienta de apoyo a la consulta de listas. El resultado no sustituye el criterio del Oficial de Cumplimiento ni el dictamen de su asesor legal.</footer>
 </div>
+<div id="modal" class="hide" role="dialog" aria-modal="true" aria-labelledby="mtitle"><div class="mbox">
+  <div class="mhead"><b id="mtitle"></b><span><button class="sec" id="mprint">Imprimir</button> <button class="sec" id="mclose">Cerrar</button></span></div>
+  <div id="mbody"></div></div></div>
 <script>
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -112,7 +149,7 @@ const TOK=()=>{try{return sessionStorage.getItem('tok')||''}catch(e){return ''}}
 const RANK={analista:1,supervisor:2,admin:3};let ME=null;
 function showLogin(msg){ME=null;try{sessionStorage.removeItem('tok')}catch(e){};$('app').classList.add('hide');$('login').classList.remove('hide');$('lerr').textContent=msg||'';$('lp').value='';$('lu').focus()}
 function showApp(){$('login').classList.add('hide');$('app').classList.remove('hide');$('quien').textContent=`${ME.usuario} · ${ME.rol}`;
- document.querySelectorAll('nav button[data-min]').forEach(b=>b.classList.toggle('hide',RANK[ME.rol]<+b.dataset.min));openTab('consulta')}
+ document.querySelectorAll('[data-min]').forEach(b=>b.classList.toggle('hide',RANK[ME.rol]<+b.dataset.min));openTab('consulta')}
 async function api(p,o={}){const r=await fetch(p,{...o,headers:{'X-API-Key':TOK(),'Content-Type':'application/json'}});
  const j=await r.json().catch(()=>({}));if(r.status==401&&p!='/v1/login'){showLogin('Su sesión terminó. Ingrese de nuevo.')}
  if(!r.ok)throw new Error(typeof j.detail=='string'?j.detail:(r.statusText||'Error'));return j}
@@ -123,20 +160,93 @@ $('lgo').onclick=doLogin;$('lp').onkeydown=e=>{if(e.key=='Enter')doLogin()};$('l
 $('salir').onclick=async()=>{try{await api('/v1/logout',{method:'POST'})}catch(e){}showLogin('')};
 (async()=>{if(!TOK())return showLogin();try{const m=await api('/v1/me');ME={usuario:m.usuario,rol:m.rol};showApp()}catch(e){showLogin()}})();
 function openTab(t){document.querySelectorAll('main>section').forEach(x=>x.classList.add('hide'));$(t).classList.remove('hide');
- document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('on',b.dataset.t==t));({alertas:loadAl,listas:loadLi,auditoria:loadAu,usuarios:loadUs})[t]?.()}
+ document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('on',b.dataset.t==t));({inicio:loadIn,alertas:loadAl,historial:()=>loadHi(true),listas:loadLi,auditoria:loadAu,usuarios:loadUs})[t]?.()}
 document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>openTab(b.dataset.t));
 const badge=l=>l?`<span class="b ${esc(l)}">${esc(l)}</span>`:'';
-function matches(ms){return ms.length?`<table><tr><th>Lista</th><th>Nombre en lista</th><th>Puntaje</th><th>Nivel</th><th>Razones</th></tr>${ms.map(m=>`<tr><td>${esc(m.fuente)}</td><td>${esc(m.nombre_coincidente)}<div class="mut">${esc(m.registro?.rfc||'')} ${esc(m.registro?.remarks||'')}</div></td><td>${m.puntaje}</td><td>${badge(m.nivel)}</td><td>${m.razones.map(esc).join('<br>')}</td></tr>`).join('')}</table>`:'<p class="ok">Sin coincidencias.</p>'}
+const QREG=[];
+function matches(ms,q){const qi=QREG.push(q||{})-1;return ms.length?`<table><tr><th>Lista</th><th>Nombre en lista</th><th>Puntaje</th><th>Nivel</th><th>Razones</th></tr>${ms.map(m=>`<tr><td>${esc(m.fuente)}</td><td>${esc(m.nombre_coincidente)}<div class="mut">${esc(m.registro?.rfc||'')} ${esc(m.registro?.remarks||'')}</div><a href="#" data-ficha="${m.entry_id}" data-q="${qi}">Ver ficha completa y comparar</a></td><td>${m.puntaje}</td><td>${badge(m.nivel)}</td><td>${m.razones.map(esc).join('<br>')}</td></tr>`).join('')}</table>`:'<p class="ok">Sin coincidencias.</p>'}
+function resHtml(r){const sin=!(r.coincidencias||[]).length;const q=r.consulta||{};
+ return `<div class="banner ${sin?'ok':(['EXACTA','ALTA'].includes(r.nivel_maximo)?'EXACTA':'MEDIA')}">${sin?'✔ Sin coincidencias en las listas consultadas':'⚠ '+esc(String(r.resultado||'').replaceAll('_',' '))+' '+badge(r.nivel_maximo)}</div>
+ <p>${q.nombre?`<b>${esc(q.nombre)}</b> · `:''}Riesgo sugerido: <b>${esc(r.riesgo_sugerido||'—')}</b> · Folio ${r.id_consulta??''} · ${r.id_consulta?`<a href="#" data-cons="/v1/screenings/${r.id_consulta}/constancia">Constancia imprimible</a>`:''}</p>
+ ${(r.acciones_recomendadas||[]).map(a=>`<p>• ${esc(a)}</p>`).join('')}${matches(r.coincidencias||[],q)}
+ ${(r.descartadas_previamente||[]).length?`<p class="mut">${r.descartadas_previamente.length} coincidencia(s) descartada(s) previamente como falso positivo.</p>`:''}
+ ${(r.alertas_generadas||[]).length?`<p><b>Alertas generadas:</b> ${r.alertas_generadas.join(', ')}</p>`:''}
+ <p class="mut">Huella de evidencia: ${esc(r.evidencia_sha256||'')}</p>`}
+async function abrirDoc(url){const h=await fetch(url,{headers:{'X-API-Key':TOK()}}).then(x=>x.text());const w=window.open('');w.document.write(h);w.document.close()}
+function openModal(t,h){$('mtitle').textContent=t;$('mbody').innerHTML=h;$('modal').classList.remove('hide');document.body.style.overflow='hidden'}
+function closeModal(){$('modal').classList.add('hide');document.body.style.overflow=''}
+$('mclose').onclick=closeModal;$('mprint').onclick=()=>window.print();$('modal').onclick=e=>{if(e.target.id=='modal')closeModal()};
+document.addEventListener('keydown',e=>{if(e.key=='Escape')closeModal()});
+document.addEventListener('click',e=>{const f=e.target.closest('[data-ficha]'),c=e.target.closest('[data-cons]'),v=e.target.closest('[data-ver]');
+ if(f){e.preventDefault();verFicha(+f.dataset.ficha,+f.dataset.q)}else if(c){e.preventDefault();abrirDoc(c.dataset.cons)}else if(v){e.preventDefault();verConsulta(+v.dataset.ver)}});
+async function verConsulta(id){openModal('Consulta folio '+id,'<p class="mut">Cargando…</p>');try{const r=await api('/v1/screenings/'+id);r.id_consulta=r.id_consulta||id;$('mbody').innerHTML=resHtml(r)}catch(e){$('mbody').innerHTML=`<p style="color:var(--rojo)">${esc(e.message)}</p>`}}
+const nrm=x=>String(x??'').replace(/\s/g,'').toUpperCase();
+function cmpRow(lbl,qv,ev,kind){let st='';if(qv&&ev){if(kind=='dob'){const L=[].concat(ev);st=L.some(d=>nrm(d)==nrm(qv))?'ok':L.some(d=>String(d).slice(0,4)==String(qv).slice(0,4))?'near':'no'}
+ else if(kind=='rfc'){st=nrm(qv)==nrm(ev)?'ok':nrm(qv).slice(0,10)==nrm(ev).slice(0,10)?'near':'no'}else st=nrm(qv)==nrm(ev)?'ok':'no'}
+ const mk=st=='ok'?'<span class="ok">✔ coincide</span>':st=='near'?'<span style="color:var(--nar)">≈ parcial</span>':st=='no'?'<span style="color:var(--rojo)">✗ distinto</span>':'<span class="mut">— sin dato para comparar</span>';
+ return `<tr><td>${lbl}</td><td>${esc(qv||'—')}</td><td>${esc([].concat(ev||'—').join(', '))}<div>${mk}</div></td></tr>`}
+async function verFicha(id,qi){openModal('Ficha del registro','<p class="mut">Cargando…</p>');try{const f=await api('/v1/entries/'+id);const q=QREG[qi]||{};const sd=f.fuente_detalle||{};
+ const kv=(k,v)=>v?`<dt>${k}</dt><dd>${esc(v)}</dd>`:'';
+ $('mbody').innerHTML=`<p style="margin:0"><span class="res">${esc(f.nombre)}</span> ${badge(sd.severity)} <span class="b">${esc(f.fuente)}</span> ${f.estatus?`<span class="b">${esc(f.estatus)}</span>`:''} ${f.activo?'':'<span class="b BAJA">Ya no está en la lista vigente</span>'}</p>
+ <h4>Su consulta frente al registro</h4><table><tr><th></th><th>Su consulta</th><th>Registro en la lista</th></tr>
+ <tr><td>Nombre</td><td>${esc(q.nombre||'—')}</td><td>${esc(f.nombre)}<div class="mut">revise también los alias abajo</div></td></tr>
+ ${cmpRow('RFC',q.rfc,f.rfc,'rfc')}${cmpRow('CURP',q.curp,f.curp)}${cmpRow('Fecha de nacimiento',q.fecha_nacimiento,f.fechas_nacimiento?.length?f.fechas_nacimiento:null,'dob')}${cmpRow('País',q.pais,f.pais)}</table>
+ <p class="mut">Coincidir en el nombre no confirma que sea la misma persona: valide con identificación oficial, fecha de nacimiento y demás datos antes de decidir.</p>
+ <h4>Nombres y alias en la lista</h4><table>${f.nombres.map(n=>`<tr><td>${esc(n.name)}</td><td class="mut">${esc(n.kind=='primary'?'nombre principal':n.kind)}</td></tr>`).join('')}</table>
+ <h4>Datos del registro</h4><dl class="kv">${kv('Tipo',f.tipo=='F'?'Persona física':f.tipo=='M'?'Persona moral':f.tipo)}${kv('RFC',f.rfc)}${kv('CURP',f.curp)}${kv('Fechas de nacimiento',(f.fechas_nacimiento||[]).join(', '))}${kv('País',f.pais)}${kv('Programa',f.programa)}${kv('Estatus',f.estatus)}${kv('Observaciones',f.observaciones)}${kv('ID en la fuente',f.id_externo)}</dl>
+ <h4>Fuente</h4><dl class="kv">${kv('Lista',sd.name)}${kv('Autoridad',sd.authority)}${kv('Fundamento',sd.legal_basis)}${kv('Qué hacer',sd.action)}${f.version_lista?kv('Versión cargada',`${f.version_lista.fetched_at?.slice(0,16).replace('T',' ')} · ${f.version_lista.filename||''} · ${f.version_lista.entry_count} registros`):''}</dl>
+ ${f.otras_apariciones.length?`<h4>También aparece en</h4><table>${f.otras_apariciones.map(o=>`<tr><td>${esc(o.fuente)}</td><td>${esc(o.nombre)} <span class="mut">(mismo ${esc(o.coincide_por)})</span></td><td><a href="#" data-ficha="${o.entry_id}" data-q="${qi}">Ver ficha</a></td></tr>`).join('')}</table>`:''}
+ ${f.verificar_en?`<h4>Verificar en la fuente oficial</h4><p><a href="${esc(f.verificar_en.url)}" target="_blank" rel="noopener noreferrer">${esc(f.verificar_en.nombre)} ↗</a> <span class="mut">· busque por «${esc(f.id_externo)}» o por el nombre</span></p>`:''}`}catch(e){$('mbody').innerHTML=`<p style="color:var(--rojo)">${esc(e.message)}</p>`}}
 $('go').onclick=async()=>{$('msg').textContent='Consultando…';try{
  const body={referencia:$('ref').value||undefined,nombre:$('nombre').value||undefined,tipo:$('tipo').value||undefined,rfc:$('rfc').value||undefined,curp:$('curp').value||undefined,fecha_nacimiento:$('dob').value||undefined};
  const r=await api('/v1/screen',{method:'POST',body:JSON.stringify(body)});$('msg').textContent='';
- const sin=!r.coincidencias.length;$('out').innerHTML=`<div class="card"><div class="banner ${sin?'ok':(['EXACTA','ALTA'].includes(r.nivel_maximo)?'EXACTA':'MEDIA')}">${sin?'✔ Sin coincidencias en las listas consultadas':'⚠ '+esc(String(r.resultado).replaceAll('_',' '))+' '+badge(r.nivel_maximo)}</div><p>Riesgo sugerido: <b>${esc(r.riesgo_sugerido)}</b> · Folio ${r.id_consulta} · <a href="#" id="cons">Constancia imprimible</a></p>
- ${r.acciones_recomendadas.map(a=>`<p>• ${esc(a)}</p>`).join('')}${matches(r.coincidencias)}
- ${r.descartadas_previamente.length?`<p class="mut">${r.descartadas_previamente.length} coincidencia(s) descartada(s) previamente como falso positivo.</p>`:''}
- ${r.alertas_generadas.length?`<p><b>Alertas generadas:</b> ${r.alertas_generadas.join(', ')}</p>`:''}
- <p class="mut">Huella de evidencia: ${esc(r.evidencia_sha256)}</p></div>`;
- $('cons').onclick=async e=>{e.preventDefault();const h=await fetch(`/v1/screenings/${r.id_consulta}/constancia`,{headers:{'X-API-Key':TOK()}}).then(x=>x.text());const w=window.open('');w.document.write(h);w.document.close()}
+ $('out').innerHTML=`<div class="card">${resHtml(r)}</div>`
 }catch(e){$('msg').textContent='';$('out').innerHTML=`<div class="card" style="color:var(--rojo)">${esc(e.message)}</div>`}};
+/* ---------- Inicio (tablero) ---------- */
+async function loadIn(){try{const d=await api('/v1/dashboard');const max=Math.max(1,...d.consultas_7_dias.map(x=>x.consultas));const mf=Math.max(1,...Object.values(d.alertas_por_fuente||{}),1);
+ const T=(n,t,c)=>`<div class="tile"><b${c?` style="color:var(--${c})"`:''}>${n}</b><span>${t}</span></div>`;
+ $('inb').innerHTML=`${d.listas_desactualizadas.length?`<div class="warn">⚠ Listas automáticas sin actualizar: <b>${d.listas_desactualizadas.map(esc).join(', ')}</b>. Revise la pestaña Listas.</div>`:''}
+ ${d.bitacora.ok?'':'<div class="warn">⚠ La bitácora de auditoría no pasó la verificación de integridad. Avise al administrador.</div>'}
+ <div class="tiles">${T(d.consultas_hoy,'consultas hoy')}${T(d.alertas_abiertas,'alertas abiertas')}${T(d.alertas_vencidas,'alertas vencidas',d.alertas_vencidas?'rojo':'')}${T(d.alertas_pendientes_aprobacion,'pendientes de aprobar')}${T(d.sujetos,'personas en monitoreo')}${T(d.registros_en_listas.toLocaleString('es-MX'),'registros en listas')}</div>
+ <div class="grid"><div class="card"><b>Consultas, últimos 7 días</b><div class="bars">${d.consultas_7_dias.map(x=>`<div title="${x.consultas} consultas"><i style="height:${Math.round(x.consultas/max*80)}px"></i>${x.consultas}<br>${x.fecha.slice(5)}</div>`).join('')}</div></div>
+ <div class="card"><b>Alertas por lista</b>${Object.entries(d.alertas_por_fuente||{}).map(([k,v])=>`<div class="hbar"><span style="width:110px">${esc(k)}</span><i style="width:${Math.max(4,v/mf*160)}px"></i>${v}</div>`).join('')||'<p class="mut">Sin alertas.</p>'}
+ <p class="mut" style="margin-bottom:0">Confirmadas: ${d.alertas_confirmadas} · Falsos positivos: ${d.falsos_positivos}</p></div></div>
+ <p class="mut">Bitácora: ${d.bitacora.ok?'<span class="ok">íntegra ✔</span>':'con problemas'} · ${d.bitacora.records??d.bitacora.registros??''} registros encadenados.</p>`}catch(e){$('inb').innerHTML=`<div class="card" style="color:var(--rojo)">${esc(e.message)}</div>`}}
+/* ---------- Historial ---------- */
+let HOFF=0;const hq=()=>{const p=new URLSearchParams();[['texto','ht'],['nivel','hn'],['tipo','hk'],['desde','hd'],['hasta','hh']].forEach(([k,i])=>{if($(i).value)p.set(k,$(i).value)});return p};
+async function loadHi(reset){if(reset)HOFF=0;$('hmsg').textContent='Buscando…';try{const p=hq();p.set('limit',50);p.set('offset',HOFF);const r=await api('/v1/screenings?'+p);$('hmsg').textContent='';
+ const rows=r.map(x=>`<tr><td><b>${esc(x.nombre||'')}</b><div class="mut">${esc(x.rfc||x.referencia||'')}</div></td><td>${x.nivel_maximo?badge(x.nivel_maximo):'<span class="ok">Sin coincidencias</span>'}<div class="mut">${esc(x.fuentes.join(', '))}</div></td><td><a href="#" data-ver="${x.id}">Ver</a> · <a href="#" data-cons="/v1/screenings/${x.id}/constancia">Constancia</a></td><td>${esc(x.fecha.slice(0,16).replace('T',' '))}<div class="mut">folio ${x.id}</div></td><td>${esc(x.tipo)}</td><td>${esc(x.usuario)}</td></tr>`).join('');
+ const head='<table><tr><th>Persona</th><th>Resultado</th><th></th><th>Fecha</th><th>Tipo</th><th>Usuario</th></tr>';
+ if(reset)$('hl').innerHTML=head+rows+'</table>';else $('hl').querySelector('table').insertAdjacentHTML('beforeend',rows);
+ if(!r.length&&reset)$('hl').innerHTML='<p class="mut">No hay consultas con esos filtros.</p>';
+ $('hl').querySelector('#hmore')?.remove();if(r.length==50)$('hl').insertAdjacentHTML('beforeend','<p id="hmore"><button class="sec">Cargar más</button></p>')}catch(e){$('hmsg').textContent=e.message}}
+$('hgo').onclick=()=>loadHi(true);$('ht').onkeydown=e=>{if(e.key=='Enter')loadHi(true)};
+$('hl').onclick=e=>{if(e.target.closest('#hmore button')){HOFF+=50;loadHi(false)}};
+$('hcsv').onclick=async()=>{try{const r=await fetch('/v1/screenings/export.csv?'+hq(),{headers:{'X-API-Key':TOK()}});if(!r.ok)throw new Error((await r.json().catch(()=>({}))).detail||'No se pudo exportar');
+ const a=document.createElement('a');a.href=URL.createObjectURL(await r.blob());a.download='historial_consultas.csv';a.click()}catch(e){$('hmsg').textContent=e.message}};
+/* ---------- Lote ---------- */
+const COLS=['nombre','rfc','curp','fecha_nacimiento','tipo','referencia'];let BRES=[];
+function parseCSV(t){t=t.replace(/^﻿/,'');const f=t.split(/\r?\n/)[0]||'';const sep=f.includes('\t')?'\t':(f.split(';').length>f.split(',').length?';':',');const rows=[];let row=[],cur='',q=false;
+ for(let i=0;i<t.length;i++){const c=t[i];if(q){if(c=='"'){if(t[i+1]=='"'){cur+='"';i++}else q=false}else cur+=c}else if(c=='"')q=true;else if(c==sep){row.push(cur);cur=''}else if(c=='\n'){row.push(cur);rows.push(row);row=[];cur=''}else if(c!='\r')cur+=c}
+ if(cur||row.length){row.push(cur);rows.push(row)}return rows.filter(r=>r.some(x=>x.trim()))}
+const hnorm=h=>h.normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase().trim().replace(/[\s-]+/g,'_');
+const SYN={nombre:'nombre',razon_social:'nombre',nombre_completo:'nombre',name:'nombre',rfc:'rfc',curp:'curp',fecha_nacimiento:'fecha_nacimiento',nacimiento:'fecha_nacimiento',dob:'fecha_nacimiento',tipo:'tipo',tipo_persona:'tipo',referencia:'referencia',ref:'referencia',id:'referencia'};
+function rowsToItems(rows){let map=COLS;const h=rows[0].map(x=>SYN[hnorm(x)]);if(h.some(Boolean)){map=h;rows=rows.slice(1)}
+ return rows.map(r=>{const o={};map.forEach((k,i)=>{if(k&&(r[i]||'').trim())o[k]=r[i].trim()});if(o.tipo)o.tipo=o.tipo.toUpperCase().slice(0,1);return o}).filter(o=>o.nombre||o.rfc||o.curp)}
+$('bf').onchange=async e=>{const f=e.target.files[0];if(f)$('bt').value=await f.text()};
+$('bplant').onclick=()=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['﻿nombre,rfc,curp,fecha_nacimiento,tipo,referencia\nJuan Pérez López,,,1980-02-03,F,C-001\nConstructora Ejemplo SA de CV,CEJ010101AB1,,,M,C-002\n'],{type:'text/csv'}));a.download='plantilla_lote.csv';a.click()};
+const csvc=v=>{v=v==null?'':String(v);if(/^[=+\-@]/.test(v))v="'"+v;return /[",\n;]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v};
+$('bgo').onclick=async()=>{let items;try{items=rowsToItems(parseCSV($('bt').value))}catch(e){items=[]}
+ if(!items.length){$('bmsg').textContent='No encontré filas válidas.';return}if(items.length>1000){$('bmsg').textContent='Máximo 1,000 filas por lote.';return}
+ $('bgo').disabled=true;BRES=[];$('bcsv').disabled=true;
+ try{for(let i=0;i<items.length;i+=25){$('bmsg').textContent=`Consultando ${Math.min(i+25,items.length)} de ${items.length}…`;const part=items.slice(i,i+25);
+  const r=await api('/v1/screen/batch',{method:'POST',body:JSON.stringify(part)});r.forEach((x,j)=>BRES.push({...part[j],...x}))}
+  $('bmsg').textContent=`Listo: ${BRES.length} consultadas.`;$('bcsv').disabled=false;
+  const con=BRES.filter(x=>x.coincidencias>0).length,err=BRES.filter(x=>x.error).length;
+  $('bout').innerHTML=`<div class="card"><p><b>${BRES.length}</b> consultadas · <b style="color:${con?'var(--nar)':'var(--ver)'}">${con}</b> con coincidencias${err?` · <b style="color:var(--rojo)">${err}</b> con error`:''}</p><table><tr><th>Persona</th><th>Resultado</th><th></th><th>Coincidencias</th><th>#</th></tr>${BRES.map((x,i)=>`<tr><td><b>${esc(x.nombre||'')}</b><div class="mut">${esc(x.rfc||x.referencia||'')}</div></td><td>${x.error?`<span style="color:var(--rojo)">${esc(x.error)}</span>`:x.nivel_maximo?badge(x.nivel_maximo):'<span class="ok">Sin coincidencias</span>'}</td><td>${x.id_consulta?`<a href="#" data-ver="${x.id_consulta}">Ver</a>`:''}</td><td>${x.coincidencias??''}</td><td>${i+1}</td></tr>`).join('')}</table></div>`
+ }catch(e){$('bmsg').textContent=e.message}$('bgo').disabled=false};
+$('bcsv').onclick=()=>{const c=['nombre','rfc','curp','fecha_nacimiento','tipo','referencia','nivel_maximo','resultado','coincidencias','id_consulta','error'];
+ const t='﻿'+c.join(',')+'\n'+BRES.map(x=>c.map(k=>csvc(x[k])).join(',')).join('\n');const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([t],{type:'text/csv'}));a.download='resultados_lote.csv';a.click()};
 const ROLES=['ENAJENANTE','ADQUIRENTE','VENDEDOR','COMPRADOR','DONANTE','DONATARIO','FIDEICOMITENTE','FIDEICOMISARIO','FIDUCIARIO','APODERADO','REPRESENTANTE','BENEFICIARIO_CONTROLADOR','SOCIO','ACCIONISTA','ARRENDADOR','ARRENDATARIO','PROMITENTE_VENDEDOR','PROMITENTE_COMPRADOR','OTORGANTE','OTRO'];
 function rowHtml(rel){return `<div class="card ${rel?'rel':'par'}" style="margin:6px 0 6px ${rel?'28px':'0'}"><div class="grid">
  <div><label>Rol</label><select class="f-rol" style="width:100%">${ROLES.map(r=>`<option ${rel&&r=='BENEFICIARIO_CONTROLADOR'?'selected':''}>${r}</option>`).join('')}</select></div>
@@ -164,7 +274,7 @@ $('goe').onclick=async()=>{$('msge').textContent='Consultando…';try{
 }catch(e){$('msge').textContent='';$('oute').innerHTML=`<div class="card" style="color:var(--rojo)">${esc(e.message)}</div>`}};
 $('clr').onclick=()=>{['nombre','rfc','curp','dob','ref'].forEach(i=>$(i).value='');$('tipo').value='';$('out').innerHTML='';$('nombre').focus()};
 $('nombre').onkeydown=e=>{if(e.key=='Enter')$('go').click()};
-async function loadUs(){try{const u=await api('/v1/users');$('ul').innerHTML=`<table><tr><th>Usuario</th><th>Rol</th><th>Entra por la página</th><th>Estado</th><th></th></tr>${u.map(x=>`<tr><td><b>${esc(x.usuario)}</b></td><td>${esc(x.rol)}</td><td>${x.puede_entrar_web?'Sí':'No (solo integración)'}</td><td>${x.activo?'<span class="ok">Activo</span>':'<span class="mut">Desactivado</span>'}</td><td><button class="sec" onclick="cambiarPw('${esc(x.usuario)}')">Cambiar contraseña</button> <button class="sec" onclick="alterna('${esc(x.usuario)}',${x.activo})">${x.activo?'Desactivar':'Activar'}</button></td></tr>`).join('')}</table>`}catch(e){$('ul').textContent=e.message}}
+async function loadUs(){try{const u=await api('/v1/users');$('ul').innerHTML=`<table><tr><th>Usuario</th><th>Rol</th><th>Estado</th><th></th><th>Entra por la página</th></tr>${u.map(x=>`<tr><td><b>${esc(x.usuario)}</b></td><td>${esc(x.rol)}</td><td>${x.activo?'<span class="ok">Activo</span>':'<span class="mut">Desactivado</span>'}</td><td><button class="sec" onclick="cambiarPw('${esc(x.usuario)}')">Cambiar contraseña</button> <button class="sec" onclick="alterna('${esc(x.usuario)}',${x.activo})">${x.activo?'Desactivar':'Activar'}</button></td><td>${x.puede_entrar_web?'Sí':'No (solo integración)'}</td></tr>`).join('')}</table>`}catch(e){$('ul').textContent=e.message}}
 $('nuc').onclick=async()=>{$('nmsg').textContent='';try{await api('/v1/users',{method:'POST',body:JSON.stringify({usuario:$('nu').value.trim(),rol:$('nr').value,contrasena:$('np').value})});$('nu').value='';$('np').value='';$('nmsg').textContent='Usuario creado.';loadUs()}catch(e){$('nmsg').textContent=e.message}};
 async function cambiarPw(n){const p=prompt(`Nueva contraseña para ${n} (mín. 10 caracteres):`);if(!p)return;try{await api(`/v1/users/${encodeURIComponent(n)}/password`,{method:'POST',body:JSON.stringify({contrasena:p})});alert('Contraseña actualizada.')}catch(e){alert(e.message)}}
 async function alterna(n,act){try{await api(`/v1/users/${encodeURIComponent(n)}/${act?'desactivar':'activar'}`,{method:'POST'});loadUs()}catch(e){alert(e.message)}}
@@ -174,7 +284,7 @@ $('ra').onclick=loadAl;$('st').onchange=loadAl;
 async function res(id,r){const n=prompt(`Justificación para ${r} (mín. 10 caracteres):`);if(!n)return;try{await api(`/v1/alerts/${id}/resolve`,{method:'POST',body:JSON.stringify({resolucion:r,nota:n})});loadAl()}catch(e){alert(e.message)}}
 async function loadLi(){try{const l=await api('/v1/lists');const MODO={AUTOMATICA:'Se actualiza sola',API:'Por API del proveedor',MANUAL:'Carga manual de archivo'};
  const est=x=>x.estado=='OK'||x.estado=='CONECTADA'?`<span class="ok">${esc(x.estado)}</span>`:(x.desactualizada?`<span class="b ALTA">${esc(x.estado)}</span>`:`<span class="mut">${esc(x.estado)}</span>`);
- $('li').innerHTML=`<table><tr><th>Fuente</th><th>Autoridad</th><th>Severidad</th><th>Registros</th><th>Última carga</th><th>Cómo se actualiza</th><th>Estado</th></tr>${l.map(x=>`<tr><td><b>${esc(x.code)}</b><div class="mut">${esc(x.name)}</div></td><td>${esc(x.authority)}</td><td>${badge(x.severity)}</td><td>${x.ultima_version?.entry_count??'—'}</td><td>${esc(x.ultima_version?.fetched_at?.slice(0,16).replace('T',' ')||'—')}</td><td>${esc(MODO[x.modo]||'')}</td><td>${est(x)}</td></tr>`).join('')}</table><p class="mut">«Se actualiza sola»: el sistema las descarga cada ${'6'} horas mientras el servicio de actualización esté encendido. «Carga manual»: requiere que alguien deposite el archivo (ver guía).</p>`}catch(e){$('li').textContent=e.message}}
+ $('li').innerHTML=`<table><tr><th>Fuente</th><th>Estado</th><th>Registros</th><th>Última carga</th><th>Cómo se actualiza</th><th>Autoridad</th><th>Severidad</th></tr>${l.map(x=>`<tr><td><b>${esc(x.code)}</b><div class="mut">${esc(x.name)}</div></td><td>${est(x)}</td><td>${x.ultima_version?.entry_count??'—'}</td><td>${esc(x.ultima_version?.fetched_at?.slice(0,16).replace('T',' ')||'—')}</td><td>${esc(MODO[x.modo]||'')}</td><td>${esc(x.authority)}</td><td>${badge(x.severity)}</td></tr>`).join('')}</table><p class="mut">«Se actualiza sola»: el sistema las descarga cada ${'6'} horas mientras el servicio de actualización esté encendido. «Carga manual»: requiere que alguien deposite el archivo (ver guía).</p>`}catch(e){$('li').textContent=e.message}}
 async function loadAu(){try{const v=await api('/v1/audit/verify');const a=await api('/v1/audit?limit=50');$('au').innerHTML=`<p>Integridad de la bitácora: <b class="${v.ok?'ok':'EXACTA'}">${v.ok?'ÍNTEGRA':'ALTERADA'}</b> (${v.registros} registros)</p><table><tr><th>#</th><th>Fecha</th><th>Usuario</th><th>Acción</th><th>Detalle</th></tr>${a.map(x=>`<tr><td>${x.seq}</td><td>${esc(x.ts.slice(0,19))}</td><td>${esc(x.actor)}</td><td>${esc(x.action)}</td><td class="mut">${esc(x.detail.slice(0,140))}</td></tr>`).join('')}</table>`}catch(e){$('au').textContent=e.message}}
 </script>
 </body>

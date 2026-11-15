@@ -8,7 +8,7 @@ import time
 from collections import defaultdict, deque
 
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, Response
 from pydantic import BaseModel, Field
 
 from .service import ROLES, Service, ServiceError
@@ -170,6 +170,28 @@ def create_app(service: Service | None = None) -> FastAPI:
             except ServiceError as e:
                 out.append({"referencia": p.referencia, "error": str(e)})
         return out
+
+    @app.get("/v1/screenings", summary="Historial de consultas con filtros")
+    def historial(texto: str | None = None, nivel: str | None = None, fuente: str | None = None,
+                  desde: str | None = None, hasta: str | None = None, tipo: str | None = None,
+                  limit: int = 100, offset: int = 0, u: dict = Depends(need("analista"))):
+        return svc.screening_history(texto, nivel, fuente, desde, hasta, tipo, limit, offset)
+
+    @app.get("/v1/screenings/export.csv", summary="Exporta el historial filtrado a CSV (supervisor)")
+    def historial_csv(texto: str | None = None, nivel: str | None = None, fuente: str | None = None,
+                      desde: str | None = None, hasta: str | None = None, tipo: str | None = None,
+                      u: dict = Depends(need("supervisor"))):
+        return Response(svc.history_csv(texto=texto, nivel=nivel, fuente=fuente, desde=desde, hasta=hasta, tipo=tipo),
+                        media_type="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": 'attachment; filename="historial_consultas.csv"'})
+
+    @app.get("/v1/screenings/{sid}", summary="Resultado completo de una consulta anterior")
+    def consulta_get(sid: int, u: dict = Depends(need("analista"))):
+        return run(svc.get_screening, sid)
+
+    @app.get("/v1/entries/{entry_id}", summary="Ficha completa de un registro de lista")
+    def ficha(entry_id: int, u: dict = Depends(need("analista"))):
+        return run(svc.entry_detail, entry_id)
 
     @app.get("/v1/screenings/{sid}/constancia", response_class=HTMLResponse, summary="Constancia imprimible")
     def constancia(sid: int, u: dict = Depends(need("analista"))):

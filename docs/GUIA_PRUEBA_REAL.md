@@ -101,6 +101,17 @@ Las condiciones gratuitas cambian: léalas al registrarse. Verifique en su contr
 - **Manuales:** LPB, PEP, SAT 49 Bis e INTERNA. Basta dejar el archivo en `data/inbox/<FUENTE>/`; el sistema lo detecta en la siguiente ronda automática (o al ejecutar `process-inbox`).
 - En un Codespace la actualización se detiene cuando este se suspende; por eso la operación real debe ir en un servidor.
 
+## 5 ter. Funciones de la página (v1.7)
+
+| Pestaña | Para qué sirve |
+|---|---|
+| **Inicio** | Tablero: consultas de hoy y de los últimos 7 días, alertas abiertas/vencidas/por lista, personas en monitoreo, aviso si alguna lista automática está atrasada y estado de la bitácora |
+| **Consulta** | Una persona. En cada coincidencia, **«Ver ficha completa y comparar»**: compara su captura (RFC, CURP, fecha de nacimiento, país) contra el registro con ✔/≈/✗, muestra todos los alias, la fuente, su fundamento legal, qué hacer, la versión de la lista y un enlace para **verificar en el sitio oficial**. Se puede imprimir |
+| **Lote** | Pegue o suba un CSV (hasta 1,000 filas; plantilla descargable). Muestra el semáforo de cada fila, abre el detalle y exporta los resultados a CSV |
+| **Historial** | Todas las consultas con filtros (texto, resultado, tipo, fechas), detalle y constancia de cada una. **Exportar a CSV** solo para supervisores y administradores |
+
+Las fechas y «hoy» se calculan con hora de la Ciudad de México (`PLD_TZ_OFFSET_H=-6`; cámbielo si opera en otra zona).
+
 ## 6. Pruebas manuales (30 min)
 
 1. Cree su usuario: `python -m pldscreen create-user director admin` (pide una contraseña de 10+ caracteres). Luego `python -m pldscreen serve --port 8000` → abrir el puerto 8000 → entre con `director` y su contraseña. (La clave de `data/clave_admin.txt` ya no se pega en la página; sirve solo para integraciones.)

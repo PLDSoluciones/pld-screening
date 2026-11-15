@@ -44,6 +44,7 @@ class Settings:
     sla_revision_hours: int = field(default_factory=lambda: int(_env("PLD_SLA_REVISION_H", "72")))
 
     # Actualización automática
+    tz_offset_hours: float = field(default_factory=lambda: float(_env("PLD_TZ_OFFSET_H", "-6")))  # CDMX = -6 (sin horario de verano)
     update_interval_hours: float = field(default_factory=lambda: float(_env("PLD_UPDATE_EVERY_H", "6")))
     min_shrink_ratio: float = field(default_factory=lambda: float(_env("PLD_MIN_SHRINK_RATIO", "0.5")))
 
